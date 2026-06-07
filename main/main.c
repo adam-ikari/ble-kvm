@@ -6,6 +6,7 @@
 #include "led_controller.h"
 #include "config_manager.h"
 #include "ble_peripheral.h"
+#include "ble_central.h"
 #include "switch_manager.h"
 #include "hid_router.h"
 
@@ -49,6 +50,7 @@ void app_main(void)
     ble_hs_cfg.sync_cb = ble_on_sync;
 
     ble_peripheral_init();
+    ble_central_init();
     switch_manager_init();
     hid_router_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
