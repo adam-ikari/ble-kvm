@@ -1,6 +1,7 @@
 #include "switch_manager.h"
 #include "ble_peripheral.h"
-#include "led_controller.h"
+#include "indicator.h"
+#include "board.h"
 #include "config_manager.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -10,11 +11,6 @@
 #include "esp_timer.h"
 
 static const char *TAG = "switch";
-static const gpio_num_t BUTTON_GPIO = GPIO_NUM_0;
-
-typedef struct {
-    switch_source_t source;
-} switch_request_t;
 
 static QueueHandle_t switch_queue;
 static TaskHandle_t switch_task_handle;
@@ -28,23 +24,23 @@ static void update_led_state(void)
     bool pc2 = ble_peripheral_is_pc_connected(2);
 
     if (!pc1 && !pc2) {
-        led_controller_set_state(LED_STATE_NO_PC);
+        indicator_set_state(IND_NO_PC);
     } else if (cfg->active_pc == 1 && pc1) {
-        led_controller_set_state(LED_STATE_PC1_ACTIVE);
+        indicator_set_state(IND_PC1_ACTIVE);
     } else if (cfg->active_pc == 2 && pc2) {
-        led_controller_set_state(LED_STATE_PC2_ACTIVE);
+        indicator_set_state(IND_PC2_ACTIVE);
     } else if (pc1) {
-        led_controller_set_state(LED_STATE_PC1_ACTIVE);
+        indicator_set_state(IND_PC1_ACTIVE);
     } else {
-        led_controller_set_state(LED_STATE_PC2_ACTIVE);
+        indicator_set_state(IND_PC2_ACTIVE);
     }
 }
 
 static void switch_task_func(void *arg)
 {
-    switch_request_t req;
+    uint8_t cmd;
     while (1) {
-        if (xQueueReceive(switch_queue, &req, pdMS_TO_TICKS(100))) {
+        if (xQueueReceive(switch_queue, &cmd, pdMS_TO_TICKS(100))) {
             kvm_config_t *cfg = config_get_mutable();
             uint8_t old_pc = cfg->active_pc;
             uint8_t new_pc = (old_pc == 1) ? 2 : 1;
@@ -55,13 +51,13 @@ static void switch_task_func(void *arg)
                 continue;
             }
 
-            led_controller_set_state(LED_STATE_SWITCHING);
+            indicator_set_state(IND_PAIRING);
             vTaskDelay(pdMS_TO_TICKS(100));
 
             cfg->active_pc = new_pc;
             config_save_active_pc();
 
-            ESP_LOGI(TAG, "Switched from PC%d to PC%d (source=%d)", old_pc, new_pc, req.source);
+            ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
             update_led_state();
         } else {
             update_led_state();
@@ -72,7 +68,7 @@ static void switch_task_func(void *arg)
 static void IRAM_ATTR button_isr_handler(void *arg)
 {
     int64_t now = esp_timer_get_time() / 1000;
-    int level = gpio_get_level(BUTTON_GPIO);
+    int level = gpio_get_level(BUTTON_SWITCH_GPIO);
 
     if (level == 0 && !button_pending) {
         button_press_time = now;
@@ -82,21 +78,21 @@ static void IRAM_ATTR button_isr_handler(void *arg)
         button_pending = false;
 
         if (duration > 50 && duration < 2000) {
-            switch_request_t req = { .source = SWITCH_SRC_BUTTON };
-            xQueueSendFromISR(switch_queue, &req, NULL);
+            uint8_t from_isr = 1;
+            xQueueSendFromISR(switch_queue, &from_isr, NULL);
         }
     }
 }
 
 void switch_manager_init(void)
 {
-    switch_queue = xQueueCreate(4, sizeof(switch_request_t));
+    switch_queue = xQueueCreate(4, sizeof(uint8_t));
     xTaskCreate(switch_task_func, "switch_mgr", 2048, NULL, 3, &switch_task_handle);
 
-    vTaskDelay(pdMS_TO_TICKS(2000));  // 2s boot delay for BOOT button
+    vTaskDelay(pdMS_TO_TICKS(2000));
 
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << BUTTON_GPIO),
+        .pin_bit_mask = (1ULL << BUTTON_SWITCH_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -104,15 +100,15 @@ void switch_manager_init(void)
     };
     gpio_config(&io_conf);
     gpio_install_isr_service(0);
-    gpio_isr_handler_add(BUTTON_GPIO, button_isr_handler, NULL);
+    gpio_isr_handler_add(BUTTON_SWITCH_GPIO, button_isr_handler, NULL);
 
     ESP_LOGI(TAG, "Switch manager initialized");
 }
 
-void switch_manager_request_switch(switch_source_t source)
+void switch_manager_request_switch(void)
 {
-    switch_request_t req = { .source = source };
-    xQueueSend(switch_queue, &req, pdMS_TO_TICKS(100));
+    uint8_t cmd = 1;
+    xQueueSend(switch_queue, &cmd, pdMS_TO_TICKS(100));
 }
 
 uint8_t switch_manager_get_active_pc(void)

@@ -3,7 +3,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
-#include "led_controller.h"
+#include "indicator.h"
 #include "config_manager.h"
 #include "wifi_manager.h"
 #include "ble_peripheral.h"
@@ -47,7 +47,7 @@ void app_main(void)
 
     config_manager_init();
     wifi_manager_init();
-    led_controller_init();
+    indicator_init();
 
     ESP_ERROR_CHECK(nimble_port_init());
     ble_hs_cfg.sync_cb = ble_on_sync;

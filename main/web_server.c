@@ -181,7 +181,7 @@ static esp_err_t switch_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
-    switch_manager_request_switch(SWITCH_SRC_WEB);
+    switch_manager_request_switch();
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
