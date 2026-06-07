@@ -33,6 +33,8 @@ typedef struct {
     char wifi_ssid[33];
     char wifi_password[65];
     bool wifi_enabled;
+    bool anti_idle_enabled;
+    uint16_t anti_idle_interval_sec;
 } kvm_config_t;
 
 void config_manager_init(void);
@@ -44,3 +46,4 @@ void config_save_active_pc(void);
 void config_save_auth_token(void);
 void config_save_wifi(void);
 void config_generate_auth_token(void);
+void config_save_anti_idle(void);

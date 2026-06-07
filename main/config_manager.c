@@ -94,6 +94,7 @@ void config_manager_init(void)
     load_active_pc();
     load_auth_token();
     load_wifi();
+    load_anti_idle();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -150,4 +151,23 @@ void config_generate_auth_token(void)
     }
     config.auth_token[AUTH_TOKEN_LEN - 1] = '\0';
     ESP_LOGI(TAG, "Generated auth token: %s", config.auth_token);
+}
+
+static void load_anti_idle(void)
+{
+    uint8_t enabled = 0;
+    esp_err_t err = nvs_get_u8(nvs_config, "anti_idle", &enabled);
+    config.anti_idle_enabled = (err == ESP_OK) ? (enabled ? true : false) : false;
+
+    uint16_t interval = 0;
+    err = nvs_get_u16(nvs_config, "anti_idle_ivl", &interval);
+    config.anti_idle_interval_sec = (err == ESP_OK) ? interval : 240;
+}
+
+void config_save_anti_idle(void)
+{
+    uint8_t enabled = config.anti_idle_enabled ? 1 : 0;
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "anti_idle", enabled));
+    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "anti_idle_ivl", config.anti_idle_interval_sec));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }

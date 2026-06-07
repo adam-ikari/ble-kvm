@@ -5,6 +5,12 @@
 #include "esp_log.h"
 
 static const char *TAG = "hid_router";
+static hid_activity_cb_t activity_cb = NULL;
+
+void hid_router_register_activity_cb(hid_activity_cb_t cb)
+{
+    activity_cb = cb;
+}
 
 void hid_router_init(void)
 {
@@ -21,6 +27,7 @@ void hid_router_forward_keyboard(const uint8_t *report, uint8_t len)
     if (rc != 0) {
         ESP_LOGW(TAG, "Keyboard forward failed: rc=%d", rc);
     }
+    if (activity_cb) activity_cb();
 }
 
 void hid_router_forward_mouse(const uint8_t *report, uint8_t len)
@@ -33,4 +40,5 @@ void hid_router_forward_mouse(const uint8_t *report, uint8_t len)
     if (rc != 0) {
         ESP_LOGW(TAG, "Mouse forward failed: rc=%d", rc);
     }
+    if (activity_cb) activity_cb();
 }
