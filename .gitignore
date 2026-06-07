@@ -1,0 +1,5 @@
+build/
+sdkconfig.old
+web/node_modules/
+web/dist/
+.vscode/
