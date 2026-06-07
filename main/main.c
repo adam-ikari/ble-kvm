@@ -5,6 +5,7 @@
 #include "host/ble_hs.h"
 #include "led_controller.h"
 #include "config_manager.h"
+#include "wifi_manager.h"
 #include "ble_peripheral.h"
 #include "ble_central.h"
 #include "switch_manager.h"
@@ -44,6 +45,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     config_manager_init();
+    wifi_manager_init();
     led_controller_init();
 
     ESP_ERROR_CHECK(nimble_port_init());
