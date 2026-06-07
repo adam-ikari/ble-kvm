@@ -2,15 +2,17 @@
 #include "board.h"
 #if HAS_TFT_DISPLAY
 
-#include "esp_lcd_panel_io_spi.h"
+#include "esp_lcd_io_spi.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_ops.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
 #include "config_manager.h"
 #include "ble_peripheral.h"
 #include "ble_central.h"
@@ -145,7 +147,7 @@ static void draw_status_page(void)
     draw_str(4, 20, "PC2", COLOR_FG, COLOR_BG);
     draw_char(28, 20, pc2 ? 'O' : ' ', pc2 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
 
-    char active_str[4];
+    char active_str[8];
     snprintf(active_str, sizeof(active_str), "PC%d", cfg->active_pc);
     int ax = (TFT_WIDTH - 5 * 3 * 3) / 2;
     for (int i = 0; active_str[i]; i++) {
@@ -187,7 +189,7 @@ static void draw_debug_page(void)
     if (ble_central_is_mouse_connected()) ble_conns++;
     if (ble_peripheral_is_pc_connected(1)) ble_conns++;
     if (ble_peripheral_is_pc_connected(2)) ble_conns++;
-    char ble_str[16];
+    char ble_str[24];
     snprintf(ble_str, sizeof(ble_str), "BLE:%d conn", ble_conns);
     draw_str(4, 80, ble_str, COLOR_FG, COLOR_BG);
 
