@@ -6,8 +6,18 @@
 #include "led_controller.h"
 #include "config_manager.h"
 #include "ble_peripheral.h"
+#include "switch_manager.h"
 
 static const char *TAG = "main";
+
+static void on_pc_conn_event(uint8_t pc_id, uint16_t conn_handle, bool connected)
+{
+    if (connected) {
+        switch_manager_on_pc_connected(pc_id, conn_handle);
+    } else {
+        switch_manager_on_pc_disconnected(pc_id);
+    }
+}
 
 static void ble_host_task(void *param)
 {
@@ -38,6 +48,8 @@ void app_main(void)
     ble_hs_cfg.sync_cb = ble_on_sync;
 
     ble_peripheral_init();
+    switch_manager_init();
+    ble_peripheral_register_conn_cb(on_pc_conn_event);
     nimble_port_freertos_init(ble_host_task);
 
     ESP_LOGI(TAG, "BLE-KVM initialized, token: %s", config_get()->auth_token);
