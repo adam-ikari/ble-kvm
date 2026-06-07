@@ -148,8 +148,24 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddBoolToObject(devices, "mouse", ble_central_is_mouse_connected());
     cJSON_AddItemToObject(root, "devices", devices);
 
-    char *ip = wifi_manager_get_ip();
-    cJSON_AddStringToObject(root, "ip", ip ? ip : "0.0.0.0");
+    cJSON *wifi = cJSON_CreateObject();
+    wifi_operating_mode_t mode = wifi_manager_get_mode();
+    const char *mode_str;
+    switch (mode) {
+    case KVM_WIFI_AP_ONLY:   mode_str = "ap"; break;
+    case KVM_WIFI_STA_ONLY:  mode_str = "sta"; break;
+    case KVM_WIFI_APSTA:     mode_str = "apsta"; break;
+    case KVM_WIFI_OFF:       mode_str = "off"; break;
+    default:                  mode_str = "unknown"; break;
+    }
+    cJSON_AddStringToObject(wifi, "mode", mode_str);
+    cJSON_AddBoolToObject(wifi, "ap_active", wifi_manager_is_ap_active());
+    cJSON_AddBoolToObject(wifi, "sta_connected", wifi_manager_is_sta_connected());
+    cJSON_AddStringToObject(wifi, "sta_ip", wifi_manager_get_sta_ip());
+    cJSON_AddStringToObject(wifi, "ap_ip", wifi_manager_get_ap_ip());
+    cJSON_AddStringToObject(wifi, "ap_ssid", wifi_manager_get_ap_ssid());
+    cJSON_AddStringToObject(wifi, "sta_ssid", cfg->wifi_ssid);
+    cJSON_AddItemToObject(root, "wifi", wifi);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -396,7 +412,7 @@ static esp_err_t wifi_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
-    char buf[128] = {0};
+    char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
@@ -409,22 +425,40 @@ static esp_err_t wifi_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Handle mode change
+    cJSON *mode_item = cJSON_GetObjectItem(body, "mode");
+    if (cJSON_IsString(mode_item)) {
+        const char *mode_str = mode_item->valuestring;
+        if (strcmp(mode_str, "ap") == 0) {
+            wifi_manager_set_mode(KVM_WIFI_AP_ONLY);
+        } else if (strcmp(mode_str, "sta") == 0) {
+            wifi_manager_set_mode(KVM_WIFI_STA_ONLY);
+        } else if (strcmp(mode_str, "apsta") == 0) {
+            wifi_manager_set_mode(KVM_WIFI_APSTA);
+        } else if (strcmp(mode_str, "off") == 0) {
+            wifi_manager_set_mode(KVM_WIFI_OFF);
+        }
+    }
+
+    // Handle STA connect
     cJSON *ssid_item = cJSON_GetObjectItem(body, "ssid");
     cJSON *pass_item = cJSON_GetObjectItem(body, "password");
-    if (!cJSON_IsString(ssid_item)) {
-        cJSON_Delete(body);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ssid");
-        return ESP_FAIL;
+    if (cJSON_IsString(ssid_item)) {
+        kvm_config_t *cfg = config_get_mutable();
+        strncpy(cfg->wifi_ssid, ssid_item->valuestring, sizeof(cfg->wifi_ssid) - 1);
+        if (cJSON_IsString(pass_item)) {
+            strncpy(cfg->wifi_password, pass_item->valuestring, sizeof(cfg->wifi_password) - 1);
+        }
+        config_save_wifi();
+        wifi_manager_start_sta(cfg->wifi_ssid, cfg->wifi_password);
     }
 
-    kvm_config_t *cfg = config_get_mutable();
-    strncpy(cfg->wifi_ssid, ssid_item->valuestring, sizeof(cfg->wifi_ssid) - 1);
-    if (cJSON_IsString(pass_item)) {
-        strncpy(cfg->wifi_password, pass_item->valuestring, sizeof(cfg->wifi_password) - 1);
+    // Handle STA disconnect
+    cJSON *disconnect = cJSON_GetObjectItem(body, "disconnect_sta");
+    if (cJSON_IsTrue(disconnect)) {
+        wifi_manager_stop_sta();
     }
-    config_save_wifi();
 
-    wifi_manager_start_sta(cfg->wifi_ssid, cfg->wifi_password);
     cJSON_Delete(body);
 
     cJSON *root = cJSON_CreateObject();

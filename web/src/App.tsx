@@ -15,7 +15,15 @@ interface Status {
   active_pc: number;
   pcs: Pc[];
   devices: { keyboard: boolean; mouse: boolean };
-  ip: string;
+  wifi: {
+    mode: string;
+    ap_active: boolean;
+    sta_connected: boolean;
+    sta_ip: string;
+    ap_ip: string;
+    ap_ssid: string;
+    sta_ssid: string;
+  };
 }
 
 export default function App() {
@@ -64,7 +72,7 @@ export default function App() {
       {status && <StatusCard status={status} onSwitch={() => api.switchPc().then(refresh)} />}
       {status && <DeviceList devices={status.devices} />}
       <PairPanel />
-      <WifiPanel />
+      <WifiPanel wifi={status?.wifi ?? null} onRefresh={refresh} />
       <SettingsPanel onRefresh={refresh} />
     </div>
   );

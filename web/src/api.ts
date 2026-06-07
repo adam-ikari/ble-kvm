@@ -37,9 +37,8 @@ export const api = {
   }),
   pairPc: () => request('/api/pair/pc', { method: 'POST' }),
   devices: () => request('/api/devices'),
-  wifi: (ssid: string, password: string) => request('/api/wifi', {
-    method: 'POST', body: JSON.stringify({ ssid, password }),
-  }),
+  wifi: (data: { ssid?: string; password?: string; mode?: string; disconnect_sta?: boolean }) =>
+    request('/api/wifi', { method: 'POST', body: JSON.stringify(data) }),
   settings: {
     get: () => request('/api/settings'),
     update: (data: object) => request('/api/settings', {
