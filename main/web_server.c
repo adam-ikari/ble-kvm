@@ -4,6 +4,7 @@
 #include "ble_central.h"
 #include "ble_peripheral.h"
 #include "wifi_manager.h"
+#include "anti_idle.h"
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -240,28 +241,25 @@ static esp_err_t scan_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Endpoint: GET /api/scan/results ──────────────────────────────── */
+/* ── Endpoint: GET /api/scan ─────────────────────────────────────── */
 
-static esp_err_t scan_results_handler(httpd_req_t *req)
+static esp_err_t scan_get_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
     const char *results = ble_central_get_scan_results_json();
-    if (!results) {
-        results = "[]";
-    }
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, results);
+    httpd_resp_sendstr(req, results ? results : "[]");
     return ESP_OK;
 }
 
-/* ── Endpoint: POST /api/pair/keyboard ────────────────────────────── */
+/* ── Endpoint: POST /api/pairings ──────────────────────────────── */
 
-static esp_err_t pair_keyboard_handler(httpd_req_t *req)
+static esp_err_t pairings_post_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
-    char buf[128] = {0};
+    char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
@@ -274,23 +272,50 @@ static esp_err_t pair_keyboard_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON *addr_item = cJSON_GetObjectItem(body, "address");
-    cJSON *type_item = cJSON_GetObjectItem(body, "addr_type");
-    if (!cJSON_IsString(addr_item) || !cJSON_IsNumber(type_item)) {
+    cJSON *type_item = cJSON_GetObjectItem(body, "type");
+    if (!cJSON_IsString(type_item)) {
         cJSON_Delete(body);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing address or addr_type");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing type field");
         return ESP_FAIL;
     }
 
-    uint8_t addr[6] = {0};
-    const char *addr_str = addr_item->valuestring;
-    unsigned int tmp[6];
-    if (sscanf(addr_str, "%02x:%02x:%02x:%02x:%02x:%02x",
-               &tmp[5], &tmp[4], &tmp[3], &tmp[2], &tmp[1], &tmp[0]) == 6) {
-        for (int i = 0; i < 6; i++) addr[i] = (uint8_t)tmp[i];
+    const char *type = type_item->valuestring;
+
+    if (strcmp(type, "pc") == 0) {
+        ble_peripheral_start_advertising();
+    } else if (strcmp(type, "device") == 0) {
+        cJSON *role_item = cJSON_GetObjectItem(body, "role");
+        cJSON *addr_item = cJSON_GetObjectItem(body, "address");
+        cJSON *atype_item = cJSON_GetObjectItem(body, "addr_type");
+
+        if (!cJSON_IsString(role_item) || !cJSON_IsString(addr_item) || !cJSON_IsNumber(atype_item)) {
+            cJSON_Delete(body);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing role, address, or addr_type");
+            return ESP_FAIL;
+        }
+
+        uint8_t addr[6] = {0};
+        unsigned int tmp[6];
+        if (sscanf(addr_item->valuestring, "%02x:%02x:%02x:%02x:%02x:%02x",
+                    &tmp[5], &tmp[4], &tmp[3], &tmp[2], &tmp[1], &tmp[0]) == 6) {
+            for (int i = 0; i < 6; i++) addr[i] = (uint8_t)tmp[i];
+        }
+
+        if (strcmp(role_item->valuestring, "keyboard") == 0) {
+            ble_central_connect_keyboard(addr, (uint8_t)atype_item->valueint);
+        } else if (strcmp(role_item->valuestring, "mouse") == 0) {
+            ble_central_connect_mouse(addr, (uint8_t)atype_item->valueint);
+        } else {
+            cJSON_Delete(body);
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid role");
+            return ESP_FAIL;
+        }
+    } else {
+        cJSON_Delete(body);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid type");
+        return ESP_FAIL;
     }
 
-    ble_central_connect_keyboard(addr, (uint8_t)type_item->valueint);
     cJSON_Delete(body);
 
     cJSON *root = cJSON_CreateObject();
@@ -303,64 +328,23 @@ static esp_err_t pair_keyboard_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Endpoint: POST /api/pair/mouse ───────────────────────────────── */
+/* ── Endpoint: DELETE /api/pairings/* ──────────────────────────── */
 
-static esp_err_t pair_mouse_handler(httpd_req_t *req)
+static esp_err_t pairings_delete_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
-    char buf[128] = {0};
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    const char *uri = req->uri;
+    const char *prefix = "/api/pairings/";
+    const char *id_start = uri + strlen(prefix);
+    if (id_start <= uri) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
         return ESP_FAIL;
     }
-
-    cJSON *body = cJSON_Parse(buf);
-    if (!body) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
-
-    cJSON *addr_item = cJSON_GetObjectItem(body, "address");
-    cJSON *type_item = cJSON_GetObjectItem(body, "addr_type");
-    if (!cJSON_IsString(addr_item) || !cJSON_IsNumber(type_item)) {
-        cJSON_Delete(body);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing address or addr_type");
-        return ESP_FAIL;
-    }
-
-    uint8_t addr[6] = {0};
-    const char *addr_str = addr_item->valuestring;
-    unsigned int tmp[6];
-    if (sscanf(addr_str, "%02x:%02x:%02x:%02x:%02x:%02x",
-               &tmp[5], &tmp[4], &tmp[3], &tmp[2], &tmp[1], &tmp[0]) == 6) {
-        for (int i = 0; i < 6; i++) addr[i] = (uint8_t)tmp[i];
-    }
-
-    ble_central_connect_mouse(addr, (uint8_t)type_item->valueint);
-    cJSON_Delete(body);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
-    char *json = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json);
-    cJSON_free(json);
-    cJSON_Delete(root);
-    return ESP_OK;
-}
-
-/* ── Endpoint: POST /api/pair/pc ──────────────────────────────────── */
-
-static esp_err_t pair_pc_handler(httpd_req_t *req)
-{
-    if (!check_auth(req)) return ESP_FAIL;
-
-    ble_peripheral_start_advertising();
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "deleted", id_start);
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
@@ -406,9 +390,43 @@ static esp_err_t devices_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Endpoint: POST /api/wifi ─────────────────────────────────────── */
+/* ── Endpoint: GET /api/wifi ─────────────────────────────────────── */
 
-static esp_err_t wifi_handler(httpd_req_t *req)
+static esp_err_t wifi_get_handler(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_FAIL;
+
+    const kvm_config_t *cfg = config_get();
+    cJSON *root = cJSON_CreateObject();
+
+    wifi_operating_mode_t mode = wifi_manager_get_mode();
+    const char *mode_str;
+    switch (mode) {
+    case KVM_WIFI_AP_ONLY:   mode_str = "ap"; break;
+    case KVM_WIFI_STA_ONLY:  mode_str = "sta"; break;
+    case KVM_WIFI_APSTA:     mode_str = "apsta"; break;
+    case KVM_WIFI_OFF:       mode_str = "off"; break;
+    default:                  mode_str = "unknown"; break;
+    }
+    cJSON_AddStringToObject(root, "mode", mode_str);
+    cJSON_AddBoolToObject(root, "ap_active", wifi_manager_is_ap_active());
+    cJSON_AddBoolToObject(root, "sta_connected", wifi_manager_is_sta_connected());
+    cJSON_AddStringToObject(root, "sta_ip", wifi_manager_get_sta_ip());
+    cJSON_AddStringToObject(root, "ap_ip", wifi_manager_get_ap_ip());
+    cJSON_AddStringToObject(root, "ap_ssid", wifi_manager_get_ap_ssid());
+    cJSON_AddStringToObject(root, "sta_ssid", cfg->wifi_ssid);
+
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ── Endpoint: PATCH /api/wifi ──────────────────────────────────── */
+
+static esp_err_t wifi_patch_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
@@ -425,22 +443,15 @@ static esp_err_t wifi_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Handle mode change
     cJSON *mode_item = cJSON_GetObjectItem(body, "mode");
     if (cJSON_IsString(mode_item)) {
         const char *mode_str = mode_item->valuestring;
-        if (strcmp(mode_str, "ap") == 0) {
-            wifi_manager_set_mode(KVM_WIFI_AP_ONLY);
-        } else if (strcmp(mode_str, "sta") == 0) {
-            wifi_manager_set_mode(KVM_WIFI_STA_ONLY);
-        } else if (strcmp(mode_str, "apsta") == 0) {
-            wifi_manager_set_mode(KVM_WIFI_APSTA);
-        } else if (strcmp(mode_str, "off") == 0) {
-            wifi_manager_set_mode(KVM_WIFI_OFF);
-        }
+        if (strcmp(mode_str, "ap") == 0) wifi_manager_set_mode(KVM_WIFI_AP_ONLY);
+        else if (strcmp(mode_str, "sta") == 0) wifi_manager_set_mode(KVM_WIFI_STA_ONLY);
+        else if (strcmp(mode_str, "apsta") == 0) wifi_manager_set_mode(KVM_WIFI_APSTA);
+        else if (strcmp(mode_str, "off") == 0) wifi_manager_set_mode(KVM_WIFI_OFF);
     }
 
-    // Handle STA connect
     cJSON *ssid_item = cJSON_GetObjectItem(body, "ssid");
     cJSON *pass_item = cJSON_GetObjectItem(body, "password");
     if (cJSON_IsString(ssid_item)) {
@@ -453,7 +464,6 @@ static esp_err_t wifi_handler(httpd_req_t *req)
         wifi_manager_start_sta(cfg->wifi_ssid, cfg->wifi_password);
     }
 
-    // Handle STA disconnect
     cJSON *disconnect = cJSON_GetObjectItem(body, "disconnect_sta");
     if (cJSON_IsTrue(disconnect)) {
         wifi_manager_stop_sta();
@@ -489,6 +499,8 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddItemToObject(root, "pc_names", pc_names);
     cJSON_AddBoolToObject(root, "wifi_enabled", cfg->wifi_enabled);
     cJSON_AddStringToObject(root, "wifi_ssid", cfg->wifi_ssid);
+    cJSON_AddBoolToObject(root, "anti_idle", cfg->anti_idle_enabled);
+    cJSON_AddNumberToObject(root, "anti_idle_interval", cfg->anti_idle_interval_sec);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -498,9 +510,9 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Endpoint: POST /api/settings ─────────────────────────────────── */
+/* ── Endpoint: PATCH /api/settings ─────────────────────────────────── */
 
-static esp_err_t settings_post_handler(httpd_req_t *req)
+static esp_err_t settings_patch_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_FAIL;
 
@@ -519,7 +531,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
 
     kvm_config_t *cfg = config_get_mutable();
 
-    /* PC name updates */
     cJSON *pc_names = cJSON_GetObjectItem(body, "pc_names");
     if (pc_names) {
         for (int i = 0; i < MAX_PC_COUNT; i++) {
@@ -534,10 +545,19 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         config_save_pcs();
     }
 
-    /* Token regeneration */
     cJSON *regen = cJSON_GetObjectItem(body, "regenerate_token");
     if (cJSON_IsTrue(regen)) {
         config_generate_auth_token();
+    }
+
+    cJSON *anti_idle = cJSON_GetObjectItem(body, "anti_idle");
+    if (cJSON_IsBool(anti_idle)) {
+        anti_idle_set_enabled(cJSON_IsTrue(anti_idle));
+    }
+
+    cJSON *anti_idle_ivl = cJSON_GetObjectItem(body, "anti_idle_interval");
+    if (cJSON_IsNumber(anti_idle_ivl)) {
+        anti_idle_set_interval((uint16_t)anti_idle_ivl->valueint);
     }
 
     cJSON_Delete(body);
@@ -581,19 +601,19 @@ void web_server_notify_device(const char *device_type, bool connected)
 /* ── URI registration table ───────────────────────────────────────── */
 
 static const httpd_uri_t uris[] = {
-    { .uri = "/",               .method = HTTP_GET,  .handler = root_handler },
-    { .uri = "/api/status",     .method = HTTP_GET,  .handler = status_handler },
-    { .uri = "/api/switch",     .method = HTTP_POST, .handler = switch_handler },
-    { .uri = "/api/events",     .method = HTTP_GET,  .handler = events_handler },
-    { .uri = "/api/scan",       .method = HTTP_POST, .handler = scan_handler },
-    { .uri = "/api/scan/results", .method = HTTP_GET, .handler = scan_results_handler },
-    { .uri = "/api/pair/keyboard", .method = HTTP_POST, .handler = pair_keyboard_handler },
-    { .uri = "/api/pair/mouse",    .method = HTTP_POST, .handler = pair_mouse_handler },
-    { .uri = "/api/pair/pc",       .method = HTTP_POST, .handler = pair_pc_handler },
-    { .uri = "/api/devices",    .method = HTTP_GET,  .handler = devices_handler },
-    { .uri = "/api/wifi",       .method = HTTP_POST, .handler = wifi_handler },
-    { .uri = "/api/settings",   .method = HTTP_GET,  .handler = settings_get_handler },
-    { .uri = "/api/settings",   .method = HTTP_POST, .handler = settings_post_handler },
+    { .uri = "/",               .method = HTTP_GET,    .handler = root_handler },
+    { .uri = "/api/status",     .method = HTTP_GET,    .handler = status_handler },
+    { .uri = "/api/switch",     .method = HTTP_POST,   .handler = switch_handler },
+    { .uri = "/api/events",     .method = HTTP_GET,    .handler = events_handler },
+    { .uri = "/api/pairings",   .method = HTTP_POST,   .handler = pairings_post_handler },
+    { .uri = "/api/pairings/*", .method = HTTP_DELETE, .handler = pairings_delete_handler },
+    { .uri = "/api/scan",       .method = HTTP_POST,   .handler = scan_handler },
+    { .uri = "/api/scan",       .method = HTTP_GET,    .handler = scan_get_handler },
+    { .uri = "/api/devices",    .method = HTTP_GET,    .handler = devices_handler },
+    { .uri = "/api/wifi",       .method = HTTP_GET,    .handler = wifi_get_handler },
+    { .uri = "/api/wifi",       .method = HTTP_PATCH,  .handler = wifi_patch_handler },
+    { .uri = "/api/settings",   .method = HTTP_GET,    .handler = settings_get_handler },
+    { .uri = "/api/settings",   .method = HTTP_PATCH,  .handler = settings_patch_handler },
 };
 
 #define NUM_URIS (sizeof(uris) / sizeof(uris[0]))
