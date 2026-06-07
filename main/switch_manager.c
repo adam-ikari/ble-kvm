@@ -10,7 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
-#include "esp_restart.h"
+#include "esp_system.h"
 
 static const char *TAG = "switch";
 

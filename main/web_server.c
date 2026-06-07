@@ -328,7 +328,7 @@ static esp_err_t pairings_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Endpoint: DELETE /api/pairings/* ──────────────────────────── */
+/* ── Endpoint: DELETE /api/pairings/{id} ───────────────────────── */
 
 static esp_err_t pairings_delete_handler(httpd_req_t *req)
 {

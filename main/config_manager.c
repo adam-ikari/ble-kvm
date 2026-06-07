@@ -82,6 +82,8 @@ static void load_wifi(void)
     }
 }
 
+static void load_anti_idle(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
