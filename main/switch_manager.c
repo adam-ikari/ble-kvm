@@ -9,13 +9,22 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
+#include "esp_restart.h"
 
 static const char *TAG = "switch";
+
+#define CMD_SWITCH       1
+#define CMD_SECONDARY    2
+#define CMD_FACTORY_RST  3
+
+#define LONG_PRESS_MS 5000
 
 static QueueHandle_t switch_queue;
 static TaskHandle_t switch_task_handle;
 static int64_t button_press_time = 0;
 static bool button_pending = false;
+static bool long_press_triggered = false;
 
 static void update_led_state(void)
 {
@@ -36,29 +45,49 @@ static void update_led_state(void)
     }
 }
 
+static void do_factory_reset(void)
+{
+    ESP_LOGW(TAG, "Factory reset triggered!");
+    indicator_set_state(IND_PAIRING);
+
+    nvs_flash_erase();
+    esp_restart();
+}
+
 static void switch_task_func(void *arg)
 {
     uint8_t cmd;
     while (1) {
         if (xQueueReceive(switch_queue, &cmd, pdMS_TO_TICKS(100))) {
-            kvm_config_t *cfg = config_get_mutable();
-            uint8_t old_pc = cfg->active_pc;
-            uint8_t new_pc = (old_pc == 1) ? 2 : 1;
+            if (cmd == CMD_SWITCH) {
+                kvm_config_t *cfg = config_get_mutable();
+                uint8_t old_pc = cfg->active_pc;
+                uint8_t new_pc = (old_pc == 1) ? 2 : 1;
 
-            if (!ble_peripheral_is_pc_connected(new_pc)) {
-                ESP_LOGW(TAG, "PC%d not connected, cannot switch", new_pc);
+                if (!ble_peripheral_is_pc_connected(new_pc)) {
+                    ESP_LOGW(TAG, "PC%d not connected, cannot switch", new_pc);
+                    update_led_state();
+                    continue;
+                }
+
+                indicator_set_state(IND_PAIRING);
+                vTaskDelay(pdMS_TO_TICKS(100));
+
+                cfg->active_pc = new_pc;
+                config_save_active_pc();
+
+                ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
                 update_led_state();
-                continue;
             }
-
-            indicator_set_state(IND_PAIRING);
-            vTaskDelay(pdMS_TO_TICKS(100));
-
-            cfg->active_pc = new_pc;
-            config_save_active_pc();
-
-            ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
-            update_led_state();
+#if HAS_SECONDARY_BUTTON
+            else if (cmd == CMD_SECONDARY) {
+                extern void tft_display_toggle_page(void);
+                tft_display_toggle_page();
+            }
+#endif
+            else if (cmd == CMD_FACTORY_RST) {
+                do_factory_reset();
+            }
         } else {
             update_led_state();
         }
@@ -73,16 +102,42 @@ static void IRAM_ATTR button_isr_handler(void *arg)
     if (level == 0 && !button_pending) {
         button_press_time = now;
         button_pending = true;
+        long_press_triggered = false;
     } else if (level == 1 && button_pending) {
         int64_t duration = now - button_press_time;
         button_pending = false;
 
-        if (duration > 50 && duration < 2000) {
-            uint8_t from_isr = 1;
-            xQueueSendFromISR(switch_queue, &from_isr, NULL);
+        if (duration >= LONG_PRESS_MS) {
+            uint8_t cmd = CMD_FACTORY_RST;
+            xQueueSendFromISR(switch_queue, &cmd, NULL);
+        } else if (duration > 50) {
+            uint8_t cmd = CMD_SWITCH;
+            xQueueSendFromISR(switch_queue, &cmd, NULL);
         }
     }
 }
+
+#if HAS_SECONDARY_BUTTON
+static void IRAM_ATTR secondary_button_isr_handler(void *arg)
+{
+    static int64_t sec_press_time = 0;
+    static bool sec_pending = false;
+    int64_t now = esp_timer_get_time() / 1000;
+    int level = gpio_get_level(BUTTON_SECONDARY_GPIO);
+
+    if (level == 0 && !sec_pending) {
+        sec_press_time = now;
+        sec_pending = true;
+    } else if (level == 1 && sec_pending) {
+        int64_t duration = now - sec_press_time;
+        sec_pending = false;
+        if (duration > 50 && duration < 2000) {
+            uint8_t cmd = CMD_SECONDARY;
+            xQueueSendFromISR(switch_queue, &cmd, NULL);
+        }
+    }
+}
+#endif
 
 void switch_manager_init(void)
 {
@@ -102,12 +157,24 @@ void switch_manager_init(void)
     gpio_install_isr_service(0);
     gpio_isr_handler_add(BUTTON_SWITCH_GPIO, button_isr_handler, NULL);
 
+#if HAS_SECONDARY_BUTTON
+    gpio_config_t io2 = {
+        .pin_bit_mask = (1ULL << BUTTON_SECONDARY_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    gpio_config(&io2);
+    gpio_isr_handler_add(BUTTON_SECONDARY_GPIO, secondary_button_isr_handler, NULL);
+#endif
+
     ESP_LOGI(TAG, "Switch manager initialized");
 }
 
 void switch_manager_request_switch(void)
 {
-    uint8_t cmd = 1;
+    uint8_t cmd = CMD_SWITCH;
     xQueueSend(switch_queue, &cmd, pdMS_TO_TICKS(100));
 }
 
