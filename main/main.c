@@ -7,6 +7,7 @@
 #include "config_manager.h"
 #include "ble_peripheral.h"
 #include "switch_manager.h"
+#include "hid_router.h"
 
 static const char *TAG = "main";
 
@@ -49,6 +50,7 @@ void app_main(void)
 
     ble_peripheral_init();
     switch_manager_init();
+    hid_router_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
     nimble_port_freertos_init(ble_host_task);
 
