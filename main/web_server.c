@@ -4,6 +4,7 @@
 #include "ble_central.h"
 #include "ble_peripheral.h"
 #include "wifi_manager.h"
+#include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -115,11 +116,9 @@ static void sse_remove_client(int fd)
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
-    const char *html = "<!DOCTYPE html><html><head><title>BLE-KVM</title></head>"
-                       "<body><h1>BLE-KVM</h1><p>Use the API at /api/*</p></body></html>";
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_sendstr(req, html);
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_send(req, (const char *)web_dist_index_html_gz, web_dist_index_html_gz_len);
     return ESP_OK;
 }
 
