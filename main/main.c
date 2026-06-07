@@ -10,6 +10,7 @@
 #include "ble_central.h"
 #include "switch_manager.h"
 #include "hid_router.h"
+#include "web_server.h"
 
 static const char *TAG = "main";
 
@@ -56,6 +57,7 @@ void app_main(void)
     switch_manager_init();
     hid_router_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
+    web_server_init();
     nimble_port_freertos_init(ble_host_task);
 
     ESP_LOGI(TAG, "BLE-KVM initialized, token: %s", config_get()->auth_token);
