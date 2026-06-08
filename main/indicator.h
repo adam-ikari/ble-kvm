@@ -3,6 +3,7 @@
 typedef enum {
     IND_PC1_ACTIVE,
     IND_PC2_ACTIVE,
+    IND_PC3_ACTIVE,
     IND_NO_PC,
     IND_PAIRING,
 } indicator_state_t;

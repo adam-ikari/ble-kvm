@@ -3,9 +3,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_PC_COUNT 2
+#define MAX_PC_COUNT 3
 #define DEVICE_NAME_MAX 32
 #define AUTH_TOKEN_LEN 9
+
+#define USB_MODE_DISABLED  0
+#define USB_MODE_DEVICE    1
+#define USB_MODE_HOST      2
 
 typedef struct {
     uint8_t identity_addr[6];
@@ -29,6 +33,7 @@ typedef struct {
     input_device_t keyboard;
     input_device_t mouse;
     uint8_t active_pc;
+    uint8_t usb_mode;               /* 0=disabled, 1=device, 2=host */
     char auth_token[AUTH_TOKEN_LEN];
     char wifi_ssid[33];
     char wifi_password[65];
@@ -50,3 +55,4 @@ void config_save_wifi(void);
 void config_generate_auth_token(void);
 void config_save_anti_idle(void);
 void config_save_input_mode(void);
+void config_save_usb_mode(void);

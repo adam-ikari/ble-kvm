@@ -56,6 +56,10 @@ static void rgb_task(void *arg)
             send_rgb(0, 0, 255);
             vTaskDelay(pdMS_TO_TICKS(1000));
             break;
+        case IND_PC3_ACTIVE:
+            send_rgb(180, 0, 255);  /* purple for USB PC */
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            break;
         case IND_NO_PC:
             send_rgb(toggle ? 255 : 0, 0, 0);
             toggle = !toggle;

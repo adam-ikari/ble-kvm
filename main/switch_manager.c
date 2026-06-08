@@ -4,6 +4,9 @@
 #include "board.h"
 #include "config_manager.h"
 #include "input_mode.h"
+#if HAS_USB
+#include "usb_device.h"
+#endif
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,6 +25,15 @@ static const char *TAG = "switch";
 
 #define LONG_PRESS_MS 5000
 
+static bool is_pc3_connected(void)
+{
+#if HAS_USB
+    return config_get()->usb_mode == USB_MODE_DEVICE && usb_device_is_connected();
+#else
+    return false;
+#endif
+}
+
 static QueueHandle_t switch_queue;
 static TaskHandle_t switch_task_handle;
 static int64_t button_press_time = 0;
@@ -33,17 +45,22 @@ static void update_led_state(void)
     const kvm_config_t *cfg = config_get();
     bool pc1 = ble_peripheral_is_pc_connected(1);
     bool pc2 = ble_peripheral_is_pc_connected(2);
+    bool pc3 = is_pc3_connected();
 
-    if (!pc1 && !pc2) {
+    if (!pc1 && !pc2 && !pc3) {
         indicator_set_state(IND_NO_PC);
     } else if (cfg->active_pc == 1 && pc1) {
         indicator_set_state(IND_PC1_ACTIVE);
     } else if (cfg->active_pc == 2 && pc2) {
         indicator_set_state(IND_PC2_ACTIVE);
+    } else if (cfg->active_pc == 3 && pc3) {
+        indicator_set_state(IND_PC3_ACTIVE);
     } else if (pc1) {
         indicator_set_state(IND_PC1_ACTIVE);
-    } else {
+    } else if (pc2) {
         indicator_set_state(IND_PC2_ACTIVE);
+    } else {
+        indicator_set_state(IND_PC3_ACTIVE);
     }
 }
 
@@ -67,10 +84,19 @@ static void switch_task_func(void *arg)
                 } else {
                     kvm_config_t *cfg = config_get_mutable();
                     uint8_t old_pc = cfg->active_pc;
-                    uint8_t new_pc = (old_pc == 1) ? 2 : 1;
+                    uint8_t new_pc = old_pc;
 
-                    if (!ble_peripheral_is_pc_connected(new_pc)) {
-                        ESP_LOGW(TAG, "PC%d not connected, cannot switch", new_pc);
+                    /* Cycle through connected PCs: 1 -> 2 -> 3 -> 1 */
+                    for (int attempt = 0; attempt < 3; attempt++) {
+                        new_pc = (new_pc % 3) + 1;
+                        if (new_pc == 3) {
+                            if (is_pc3_connected()) break;
+                        } else {
+                            if (ble_peripheral_is_pc_connected(new_pc)) break;
+                        }
+                    }
+                    if (new_pc == old_pc) {
+                        ESP_LOGW(TAG, "No other connected PC to switch to");
                         update_led_state();
                         continue;
                     }
@@ -201,7 +227,11 @@ uint8_t switch_manager_get_active_pc(void)
 
 uint16_t switch_manager_get_active_conn_handle(void)
 {
-    return ble_peripheral_get_conn_handle(config_get()->active_pc);
+    const kvm_config_t *cfg = config_get();
+    if (cfg->active_pc == 3 && cfg->usb_mode == USB_MODE_DEVICE) {
+        return 0xFFFF;
+    }
+    return ble_peripheral_get_conn_handle(cfg->active_pc);
 }
 
 void switch_manager_on_pc_connected(uint8_t pc_id, uint16_t conn_handle)
@@ -215,10 +245,21 @@ void switch_manager_on_pc_disconnected(uint8_t pc_id)
     ESP_LOGI(TAG, "PC%d disconnected", pc_id);
     kvm_config_t *cfg = config_get_mutable();
     if (cfg->active_pc == pc_id) {
-        uint8_t other = (pc_id == 1) ? 2 : 1;
-        if (ble_peripheral_is_pc_connected(other)) {
-            cfg->active_pc = other;
-            config_save_active_pc();
+        for (uint8_t candidate = 1; candidate <= 3; candidate++) {
+            if (candidate == pc_id) continue;
+            if (candidate == 3) {
+                if (is_pc3_connected()) {
+                    cfg->active_pc = candidate;
+                    config_save_active_pc();
+                    break;
+                }
+            } else {
+                if (ble_peripheral_is_pc_connected(candidate)) {
+                    cfg->active_pc = candidate;
+                    config_save_active_pc();
+                    break;
+                }
+            }
         }
     }
     update_led_state();

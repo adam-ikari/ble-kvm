@@ -3,6 +3,10 @@
 #include "switch_manager.h"
 #include "ble_peripheral.h"
 #include "ble_central.h"
+#if HAS_USB
+#include "usb_device.h"
+#include "usb_host.h"
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -14,16 +18,27 @@ static bool active = false;
 
 static void send_mouse_nudge(void)
 {
-    uint16_t conn = switch_manager_get_active_conn_handle();
-    if (conn == 0 || !ble_central_is_mouse_connected()) return;
+    const kvm_config_t *cfg = config_get();
 
-    uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
-    ble_peripheral_send_hid_report(conn, 2, report1, sizeof(report1));
-
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    uint8_t report2[] = {0x00, 0xFF, 0x00, 0x00};
-    ble_peripheral_send_hid_report(conn, 2, report2, sizeof(report2));
+    if (cfg->active_pc == 3 && cfg->usb_mode == USB_MODE_DEVICE) {
+#if HAS_USB
+        if (!usb_device_is_connected()) return;
+        uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
+        usb_device_send_mouse(report1, sizeof(report1));
+        vTaskDelay(pdMS_TO_TICKS(20));
+        uint8_t report2[] = {0x00, 0xFF, 0x00, 0x00};
+        usb_device_send_mouse(report2, sizeof(report2));
+#endif
+    } else {
+        uint16_t conn = switch_manager_get_active_conn_handle();
+        if (conn == 0 || conn == 0xFFFF) return;
+        if (!ble_central_is_mouse_connected()) return;
+        uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
+        ble_peripheral_send_hid_report(conn, 2, report1, sizeof(report1));
+        vTaskDelay(pdMS_TO_TICKS(20));
+        uint8_t report2[] = {0x00, 0xFF, 0x00, 0x00};
+        ble_peripheral_send_hid_report(conn, 2, report2, sizeof(report2));
+    }
 }
 
 static void idle_timer_cb(void *arg)
@@ -35,8 +50,19 @@ static void idle_timer_cb(void *arg)
 static void restart_timer(void)
 {
     esp_timer_stop(idle_timer);
-    if (config_get()->anti_idle_enabled && ble_central_is_mouse_connected()) {
-        uint16_t interval = config_get()->anti_idle_interval_sec;
+    const kvm_config_t *cfg = config_get();
+    bool has_input = false;
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_HOST) {
+        has_input = usb_host_is_mouse_connected();
+    } else {
+        has_input = ble_central_is_mouse_connected();
+    }
+#else
+    has_input = ble_central_is_mouse_connected();
+#endif
+    if (cfg->anti_idle_enabled && has_input) {
+        uint16_t interval = cfg->anti_idle_interval_sec;
         esp_timer_start_periodic(idle_timer, (uint64_t)interval * 1000000);
         active = true;
     } else {

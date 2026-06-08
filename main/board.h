@@ -25,6 +25,7 @@
   #define HAS_GPIO_LED           0
   #define HAS_INPUT_MODES        1
   #define IMU_I2C_ADDR           0x68
+  #define HAS_USB                1
 
 #elif defined(BOARD_M5STAMPS3)
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_0
@@ -34,6 +35,7 @@
   #define HAS_GPIO_LED           0
   #define HAS_TFT_DISPLAY        0
   #define HAS_BATTERY            0
+  #define HAS_USB                1
 
 #else
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_0
@@ -44,4 +46,5 @@
   #define HAS_RGB_LED            0
   #define HAS_TFT_DISPLAY        0
   #define HAS_BATTERY            0
+  #define HAS_USB                0
 #endif

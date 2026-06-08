@@ -13,6 +13,11 @@
 #include "anti_idle.h"
 #include "board.h"
 #include "input_mode.h"
+#if HAS_USB
+#include "usb_device.h"
+#include "usb_host.h"
+#include "hid_router.h"
+#endif
 #if HAS_BATTERY
 #include "power_manager.h"
 #endif
@@ -52,6 +57,21 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     config_manager_init();
+
+    const kvm_config_t *cfg = config_get();
+
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_DEVICE) {
+        usb_device_init();
+        ESP_LOGI(TAG, "USB Device mode active");
+    } else if (cfg->usb_mode == USB_MODE_HOST) {
+        usb_host_init(hid_router_on_usb_keyboard, hid_router_on_usb_mouse);
+        ESP_LOGI(TAG, "USB Host mode active");
+    } else {
+        ESP_LOGI(TAG, "USB disabled (BLE-only)");
+    }
+#endif
+
     wifi_manager_init();
     indicator_init();
 
@@ -59,7 +79,12 @@ void app_main(void)
     ble_hs_cfg.sync_cb = ble_on_sync;
 
     ble_peripheral_init();
-    ble_central_init();
+
+    /* Skip BLE central when USB Host replaces it for input */
+    if (cfg->usb_mode != USB_MODE_HOST) {
+        ble_central_init();
+    }
+
     switch_manager_init();
     hid_router_init();
     hid_router_register_activity_cb(anti_idle_on_activity);
@@ -74,5 +99,6 @@ void app_main(void)
 #endif
     nimble_port_freertos_init(ble_host_task);
 
-    ESP_LOGI(TAG, "BLE-KVM initialized, token: %s", config_get()->auth_token);
+    ESP_LOGI(TAG, "BLE-KVM initialized, token: %s, usb_mode: %d",
+             config_get()->auth_token, cfg->usb_mode);
 }

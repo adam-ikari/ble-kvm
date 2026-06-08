@@ -26,6 +26,7 @@ static void load_pcs(void)
         memset(config.pcs, 0, sizeof(config.pcs));
         config.pcs[0].pc_id = 1;
         config.pcs[1].pc_id = 2;
+        config.pcs[2].pc_id = 3;
     }
 }
 
@@ -86,6 +87,8 @@ static void load_anti_idle(void);
 
 static void load_input_mode(void);
 
+static void load_usb_mode(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
@@ -100,6 +103,7 @@ void config_manager_init(void)
     load_wifi();
     load_anti_idle();
     load_input_mode();
+    load_usb_mode();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -190,5 +194,19 @@ void config_save_input_mode(void)
 {
     ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "input_mode", config.input_mode));
     ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "air_sens", config.air_mouse_sensitivity));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+static void load_usb_mode(void)
+{
+    esp_err_t err = nvs_get_u8(nvs_config, "usb_mode", &config.usb_mode);
+    if (err != ESP_OK || config.usb_mode > USB_MODE_HOST) {
+        config.usb_mode = USB_MODE_DISABLED;
+    }
+}
+
+void config_save_usb_mode(void)
+{
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "usb_mode", config.usb_mode));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }

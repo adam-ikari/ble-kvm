@@ -21,6 +21,12 @@ else()
     list(APPEND COMPONENT_SRCS "gpio_led.c")
 endif()
 
+# USB modules (ESP32-S3 only)
+if(BOARD STREQUAL "m5sticks3" OR BOARD STREQUAL "m5stamps3")
+    list(APPEND COMPONENT_SRCS "usb_device.c" "usb_host.c")
+    list(APPEND EXTRA_REQUIRES "esp_tinyusb" "usb_host_hid")
+endif()
+
 idf_component_register(
     SRCS ${COMPONENT_SRCS}
     INCLUDE_DIRS "."

@@ -20,6 +20,10 @@
 #include "wifi_manager.h"
 #include "input_mode.h"
 #include "imu_driver.h"
+#if HAS_USB
+#include "usb_device.h"
+#include "usb_host.h"
+#endif
 
 static const char *TAG = "tft";
 static esp_lcd_panel_handle_t panel = NULL;
@@ -141,14 +145,29 @@ static void draw_status_page(void)
     memset(fb, 0, sizeof(fb));
     const kvm_config_t *cfg = config_get();
 
+    /* PC1 - BLE */
     bool pc1 = ble_peripheral_is_pc_connected(1);
-    draw_str(4, 8, "PC1", COLOR_FG, COLOR_BG);
-    draw_char(28, 8, pc1 ? 'O' : ' ', pc1 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
+    draw_str(4, 8, cfg->pcs[0].name[0] ? cfg->pcs[0].name : "PC1", COLOR_FG, COLOR_BG);
+    draw_char(4 + 6 * 3, 8, pc1 ? 'O' : ' ', pc1 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
 
+    /* PC2 - BLE */
     bool pc2 = ble_peripheral_is_pc_connected(2);
-    draw_str(4, 20, "PC2", COLOR_FG, COLOR_BG);
-    draw_char(28, 20, pc2 ? 'O' : ' ', pc2 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
+    draw_str(4, 20, cfg->pcs[1].name[0] ? cfg->pcs[1].name : "PC2", COLOR_FG, COLOR_BG);
+    draw_char(4 + 6 * 3, 20, pc2 ? 'O' : ' ', pc2 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
 
+    /* PC3 - USB */
+    bool pc3 = false;
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_DEVICE) {
+        pc3 = usb_device_is_connected();
+    }
+#endif
+    if (cfg->usb_mode == USB_MODE_DEVICE) {
+        draw_str(4, 32, cfg->pcs[2].name[0] ? cfg->pcs[2].name : "PC3", COLOR_FG, COLOR_BG);
+        draw_char(4 + 6 * 3, 32, pc3 ? 'O' : ' ', pc3 ? COLOR_GREEN : COLOR_RED, COLOR_BG);
+    }
+
+    /* Active PC indicator (big text) */
     char active_str[8];
     snprintf(active_str, sizeof(active_str), "PC%d", cfg->active_pc);
     int ax = (TFT_WIDTH - 5 * 3 * 3) / 2;
@@ -156,11 +175,39 @@ static void draw_status_page(void)
         draw_big_char(ax + i * 18, 60, active_str[i], COLOR_GREEN, COLOR_BG);
     }
 
-    bool kb = ble_central_is_keyboard_connected();
-    bool ms = ble_central_is_mouse_connected();
-    draw_str(4, 140, "KB", kb ? COLOR_GREEN : COLOR_RED, COLOR_BG);
-    draw_str(40, 140, "MS", ms ? COLOR_GREEN : COLOR_RED, COLOR_BG);
+    /* Input devices */
+    bool kb = false, ms = false;
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_HOST) {
+        kb = usb_host_is_keyboard_connected();
+        ms = usb_host_is_mouse_connected();
+    } else {
+        kb = ble_central_is_keyboard_connected();
+        ms = ble_central_is_mouse_connected();
+    }
+#else
+    kb = ble_central_is_keyboard_connected();
+    ms = ble_central_is_mouse_connected();
+#endif
+    draw_str(4, 120, cfg->keyboard.name[0] ? cfg->keyboard.name : "KB",
+             kb ? COLOR_GREEN : COLOR_RED, COLOR_BG);
+    draw_str(40, 120, cfg->mouse.name[0] ? cfg->mouse.name : "MS",
+             ms ? COLOR_GREEN : COLOR_RED, COLOR_BG);
 
+    /* Input source indicator */
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_HOST) {
+        draw_str(68, 120, "USB", COLOR_BLUE, COLOR_BG);
+    } else if (cfg->usb_mode == USB_MODE_DEVICE) {
+        draw_str(68, 120, "U-D", COLOR_BLUE, COLOR_BG);
+    } else {
+        draw_str(68, 120, "BLE", COLOR_BLUE, COLOR_BG);
+    }
+#else
+    draw_str(68, 120, "BLE", COLOR_BLUE, COLOR_BG);
+#endif
+
+    /* Mode indicator */
     const char *mode_names[] = {"KVM", "PPT"};
     input_mode_t mode = input_mode_get();
     draw_str(68, 140, mode_names[mode], mode == INPUT_MODE_KVM ? COLOR_GREEN : COLOR_BLUE, COLOR_BG);
@@ -199,7 +246,14 @@ static void draw_debug_page(void)
     snprintf(ble_str, sizeof(ble_str), "BLE:%d conn", ble_conns);
     draw_str(4, 80, ble_str, COLOR_FG, COLOR_BG);
 
+#if HAS_USB
+    const char *usb_modes[] = {"OFF", "U-D", "U-H"};
+    draw_str(4, 100, "USB:", COLOR_FG, COLOR_BG);
+    draw_str(34, 100, usb_modes[cfg->usb_mode], COLOR_BLUE, COLOR_BG);
+#else
     draw_str(4, 100, "IMU:OK", COLOR_GREEN, COLOR_BG);
+#endif
+
     char sens_str[12];
     snprintf(sens_str, sizeof(sens_str), "SNS:%d", cfg->air_mouse_sensitivity);
     draw_str(50, 100, sens_str, COLOR_FG, COLOR_BG);

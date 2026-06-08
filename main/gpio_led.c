@@ -30,6 +30,10 @@ static void led_task(void *arg)
             set_leds(false, true);
             vTaskDelay(pdMS_TO_TICKS(1000));
             break;
+        case IND_PC3_ACTIVE:
+            set_leds(true, true);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            break;
         case IND_PAIRING:
             set_leds(toggle, !toggle);
             toggle = !toggle;

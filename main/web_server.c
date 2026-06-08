@@ -6,6 +6,10 @@
 #include "wifi_manager.h"
 #include "anti_idle.h"
 #include "input_mode.h"
+#if HAS_USB
+#include "usb_device.h"
+#include "usb_host.h"
+#endif
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -14,6 +18,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include "esp_system.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t server = NULL;
@@ -140,14 +145,37 @@ static esp_err_t status_handler(httpd_req_t *req)
         cJSON *pc = cJSON_CreateObject();
         cJSON_AddNumberToObject(pc, "id", i + 1);
         cJSON_AddStringToObject(pc, "name", cfg->pcs[i].name[0] ? cfg->pcs[i].name : "");
-        cJSON_AddBoolToObject(pc, "connected", ble_peripheral_is_pc_connected(i + 1));
+        bool connected;
+        if (i == 2) {
+#if HAS_USB
+            connected = (cfg->usb_mode == USB_MODE_DEVICE) ? usb_device_is_connected() : false;
+#else
+            connected = false;
+#endif
+        } else {
+            connected = ble_peripheral_is_pc_connected(i + 1);
+        }
+        cJSON_AddBoolToObject(pc, "connected", connected);
+        cJSON_AddStringToObject(pc, "type", (i == 2) ? "usb" : "ble");
         cJSON_AddItemToArray(pcs, pc);
     }
     cJSON_AddItemToObject(root, "pcs", pcs);
 
     cJSON *devices = cJSON_CreateObject();
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_HOST) {
+        cJSON_AddBoolToObject(devices, "keyboard", usb_host_is_keyboard_connected());
+        cJSON_AddBoolToObject(devices, "mouse", usb_host_is_mouse_connected());
+        cJSON_AddStringToObject(devices, "input_source", "usb");
+    } else {
+        cJSON_AddBoolToObject(devices, "keyboard", ble_central_is_keyboard_connected());
+        cJSON_AddBoolToObject(devices, "mouse", ble_central_is_mouse_connected());
+        cJSON_AddStringToObject(devices, "input_source", "ble");
+    }
+#else
     cJSON_AddBoolToObject(devices, "keyboard", ble_central_is_keyboard_connected());
     cJSON_AddBoolToObject(devices, "mouse", ble_central_is_mouse_connected());
+#endif
     cJSON_AddItemToObject(root, "devices", devices);
 
     cJSON *wifi = cJSON_CreateObject();
@@ -171,6 +199,24 @@ static esp_err_t status_handler(httpd_req_t *req)
 
     cJSON_AddNumberToObject(root, "input_mode", cfg->input_mode);
     cJSON_AddNumberToObject(root, "air_mouse_sensitivity", cfg->air_mouse_sensitivity);
+
+    cJSON_AddNumberToObject(root, "usb_mode", cfg->usb_mode);
+    cJSON *usb = cJSON_CreateObject();
+#if HAS_USB
+    if (cfg->usb_mode == USB_MODE_DEVICE) {
+        cJSON_AddStringToObject(usb, "mode", "device");
+        cJSON_AddBoolToObject(usb, "connected", usb_device_is_connected());
+    } else if (cfg->usb_mode == USB_MODE_HOST) {
+        cJSON_AddStringToObject(usb, "mode", "host");
+        cJSON_AddBoolToObject(usb, "keyboard_connected", usb_host_is_keyboard_connected());
+        cJSON_AddBoolToObject(usb, "mouse_connected", usb_host_is_mouse_connected());
+    } else {
+        cJSON_AddStringToObject(usb, "mode", "disabled");
+    }
+#else
+    cJSON_AddStringToObject(usb, "mode", "disabled");
+#endif
+    cJSON_AddItemToObject(root, "usb", usb);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -507,6 +553,9 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "anti_idle_interval", cfg->anti_idle_interval_sec);
     cJSON_AddNumberToObject(root, "input_mode", cfg->input_mode);
     cJSON_AddNumberToObject(root, "air_mouse_sensitivity", cfg->air_mouse_sensitivity);
+    cJSON_AddNumberToObject(root, "usb_mode", cfg->usb_mode);
+    cJSON_AddStringToObject(root, "keyboard_name", cfg->keyboard.name[0] ? cfg->keyboard.name : "");
+    cJSON_AddStringToObject(root, "mouse_name", cfg->mouse.name[0] ? cfg->mouse.name : "");
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -581,6 +630,45 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
             config_get_mutable()->air_mouse_sensitivity = (uint8_t)val;
             config_save_input_mode();
         }
+    }
+
+    cJSON *usb_mode_item = cJSON_GetObjectItem(body, "usb_mode");
+    if (cJSON_IsNumber(usb_mode_item)) {
+        int val = usb_mode_item->valueint;
+        if (val >= USB_MODE_DISABLED && val <= USB_MODE_HOST) {
+            uint8_t old_mode = cfg->usb_mode;
+            cfg->usb_mode = (uint8_t)val;
+            config_save_usb_mode();
+            if (val != old_mode) {
+                cJSON_Delete(body);
+                cJSON *root = cJSON_CreateObject();
+                cJSON_AddBoolToObject(root, "ok", true);
+                cJSON_AddStringToObject(root, "message", "Reboot required for USB mode change");
+                cJSON_AddBoolToObject(root, "reboot_required", true);
+                char *json = cJSON_PrintUnformatted(root);
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req, json);
+                cJSON_free(json);
+                cJSON_Delete(root);
+                vTaskDelay(pdMS_TO_TICKS(500));
+                esp_restart();
+                return ESP_OK;
+            }
+        }
+    }
+
+    cJSON *kb_name = cJSON_GetObjectItem(body, "keyboard_name");
+    if (cJSON_IsString(kb_name)) {
+        strncpy(cfg->keyboard.name, kb_name->valuestring, DEVICE_NAME_MAX - 1);
+        cfg->keyboard.name[DEVICE_NAME_MAX - 1] = '\0';
+        config_save_input_devices();
+    }
+
+    cJSON *ms_name = cJSON_GetObjectItem(body, "mouse_name");
+    if (cJSON_IsString(ms_name)) {
+        strncpy(cfg->mouse.name, ms_name->valuestring, DEVICE_NAME_MAX - 1);
+        cfg->mouse.name[DEVICE_NAME_MAX - 1] = '\0';
+        config_save_input_devices();
     }
 
     cJSON_Delete(body);
