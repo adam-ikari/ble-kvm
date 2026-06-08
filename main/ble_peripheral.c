@@ -19,6 +19,7 @@ static const char *TAG = "ble_peripheral";
 /* HID Report IDs */
 #define HID_REPORT_ID_KEYBOARD  1
 #define HID_REPORT_ID_MOUSE     2
+#define HID_REPORT_ID_CONSUMER  3
 
 /* GATT Service UUIDs */
 #define BLE_SVC_HID_UUID16              0x1812
@@ -35,7 +36,7 @@ static const char *TAG = "ble_peripheral";
 /* HID Information: version 2.0 (0x0200), country code 0, flags 0 */
 static const uint8_t hid_information[] = {0x00, 0x02};
 
-/* HID Report Map: keyboard (Report ID 1) + mouse (Report ID 2) */
+/* HID Report Map: keyboard (Report ID 1) + mouse (Report ID 2) + consumer (Report ID 3) */
 static const uint8_t hid_report_map[] = {
     /* Keyboard (Report ID 1) */
     0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01,
@@ -57,6 +58,12 @@ static const uint8_t hid_report_map[] = {
     0x09, 0x38, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08,
     0x95, 0x01, 0x81, 0x06,
     0xC0, 0xC0,
+    /* Consumer Control (Report ID 3) */
+    0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x03,
+    0x15, 0x00, 0x26, 0xFF, 0x03,
+    0x19, 0x00, 0x2A, 0xFF, 0x03,
+    0x75, 0x10, 0x95, 0x01, 0x81, 0x00,
+    0xC0,
 };
 
 /* Per-PC connection tracking */
@@ -76,6 +83,7 @@ static ble_peripheral_conn_cb_t conn_cb = NULL;
 /* Storage for characteristic value handles (filled at registration time) */
 static uint16_t keyboard_report_val_handle;
 static uint16_t mouse_report_val_handle;
+static uint16_t consumer_report_val_handle;
 
 /* Forward declarations */
 static int ble_hid_access_cb(uint16_t conn_handle, uint16_t attr_handle,
@@ -96,6 +104,16 @@ static struct ble_gatt_dsc_def hid_dsc_keyboard_ccc[] = {
 
 /* Mouse Report CCC descriptor */
 static struct ble_gatt_dsc_def hid_dsc_mouse_ccc[] = {
+    {
+        .uuid = BLE_UUID16_DECLARE(BLE_GATT_DSC_CLT_CFG_UUID16),
+        .access_cb = ble_hid_access_cb,
+        .att_flags = BLE_ATT_F_READ | BLE_ATT_F_WRITE,
+    },
+    { 0 },
+};
+
+/* Consumer Control Report CCC descriptor */
+static struct ble_gatt_dsc_def hid_dsc_consumer_ccc[] = {
     {
         .uuid = BLE_UUID16_DECLARE(BLE_GATT_DSC_CLT_CFG_UUID16),
         .access_cb = ble_hid_access_cb,
@@ -133,6 +151,14 @@ static const struct ble_gatt_chr_def hid_svc_chrs[] = {
         .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &mouse_report_val_handle,
         .descriptors = hid_dsc_mouse_ccc,
+    },
+    /* Consumer Control Report (Report ID 3) */
+    {
+        .uuid = BLE_UUID16_DECLARE(BLE_SVC_HID_CHR_REPORT),
+        .access_cb = ble_hid_access_cb,
+        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+        .val_handle = &consumer_report_val_handle,
+        .descriptors = hid_dsc_consumer_ccc,
     },
     /* HID Information */
     {
@@ -438,6 +464,8 @@ int ble_peripheral_send_hid_report(uint16_t conn_handle, uint8_t report_id,
         attr_handle = keyboard_report_val_handle;
     } else if (report_id == HID_REPORT_ID_MOUSE) {
         attr_handle = mouse_report_val_handle;
+    } else if (report_id == HID_REPORT_ID_CONSUMER) {
+        attr_handle = consumer_report_val_handle;
     } else {
         ESP_LOGE(TAG, "Unknown report ID: %d", report_id);
         return BLE_HS_EINVAL;
@@ -465,6 +493,12 @@ int ble_peripheral_send_hid_report(uint16_t conn_handle, uint8_t report_id,
     }
 
     return rc;
+}
+
+int ble_peripheral_send_consumer_key(uint16_t conn_handle, uint16_t usage_code)
+{
+    uint8_t data[2] = {usage_code & 0xFF, (usage_code >> 8) & 0xFF};
+    return ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_CONSUMER, data, 2);
 }
 
 /* ----- Callback Registration ----- */

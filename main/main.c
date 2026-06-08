@@ -12,6 +12,7 @@
 #include "hid_router.h"
 #include "anti_idle.h"
 #include "board.h"
+#include "input_mode.h"
 #if HAS_BATTERY
 #include "power_manager.h"
 #endif
@@ -67,6 +68,9 @@ void app_main(void)
     web_server_init();
 #if HAS_BATTERY
     power_manager_init();
+#endif
+#if HAS_INPUT_MODES
+    input_mode_init();
 #endif
     nimble_port_freertos_init(ble_host_task);
 

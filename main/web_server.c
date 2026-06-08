@@ -5,6 +5,7 @@
 #include "ble_peripheral.h"
 #include "wifi_manager.h"
 #include "anti_idle.h"
+#include "input_mode.h"
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -167,6 +168,9 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(wifi, "ap_ssid", wifi_manager_get_ap_ssid());
     cJSON_AddStringToObject(wifi, "sta_ssid", cfg->wifi_ssid);
     cJSON_AddItemToObject(root, "wifi", wifi);
+
+    cJSON_AddNumberToObject(root, "input_mode", cfg->input_mode);
+    cJSON_AddNumberToObject(root, "air_mouse_sensitivity", cfg->air_mouse_sensitivity);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -501,6 +505,8 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "wifi_ssid", cfg->wifi_ssid);
     cJSON_AddBoolToObject(root, "anti_idle", cfg->anti_idle_enabled);
     cJSON_AddNumberToObject(root, "anti_idle_interval", cfg->anti_idle_interval_sec);
+    cJSON_AddNumberToObject(root, "input_mode", cfg->input_mode);
+    cJSON_AddNumberToObject(root, "air_mouse_sensitivity", cfg->air_mouse_sensitivity);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -558,6 +564,23 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
     cJSON *anti_idle_ivl = cJSON_GetObjectItem(body, "anti_idle_interval");
     if (cJSON_IsNumber(anti_idle_ivl)) {
         anti_idle_set_interval((uint16_t)anti_idle_ivl->valueint);
+    }
+
+    cJSON *im = cJSON_GetObjectItem(body, "input_mode");
+    if (cJSON_IsNumber(im)) {
+        int val = im->valueint;
+        if (val >= 0 && val <= 1) {
+            input_mode_set((input_mode_t)val);
+        }
+    }
+
+    cJSON *sens = cJSON_GetObjectItem(body, "air_mouse_sensitivity");
+    if (cJSON_IsNumber(sens)) {
+        int val = sens->valueint;
+        if (val >= 1 && val <= 10) {
+            config_get_mutable()->air_mouse_sensitivity = (uint8_t)val;
+            config_save_input_mode();
+        }
     }
 
     cJSON_Delete(body);

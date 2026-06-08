@@ -18,6 +18,8 @@
 #include "ble_central.h"
 #include "switch_manager.h"
 #include "wifi_manager.h"
+#include "input_mode.h"
+#include "imu_driver.h"
 
 static const char *TAG = "tft";
 static esp_lcd_panel_handle_t panel = NULL;
@@ -159,6 +161,10 @@ static void draw_status_page(void)
     draw_str(4, 140, "KB", kb ? COLOR_GREEN : COLOR_RED, COLOR_BG);
     draw_str(40, 140, "MS", ms ? COLOR_GREEN : COLOR_RED, COLOR_BG);
 
+    const char *mode_names[] = {"KVM", "PPT"};
+    input_mode_t mode = input_mode_get();
+    draw_str(68, 140, mode_names[mode], mode == INPUT_MODE_KVM ? COLOR_GREEN : COLOR_BLUE, COLOR_BG);
+
 #if HAS_BATTERY
     draw_str(4, 160, "BAT", COLOR_FG, COLOR_BG);
 #endif
@@ -192,6 +198,11 @@ static void draw_debug_page(void)
     char ble_str[24];
     snprintf(ble_str, sizeof(ble_str), "BLE:%d conn", ble_conns);
     draw_str(4, 80, ble_str, COLOR_FG, COLOR_BG);
+
+    draw_str(4, 100, "IMU:OK", COLOR_GREEN, COLOR_BG);
+    char sens_str[12];
+    snprintf(sens_str, sizeof(sens_str), "SNS:%d", cfg->air_mouse_sensitivity);
+    draw_str(50, 100, sens_str, COLOR_FG, COLOR_BG);
 
     flush_fb();
 }

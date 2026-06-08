@@ -12,7 +12,7 @@ set(COMPONENT_SRCS
 set(EXTRA_REQUIRES "")
 
 if(BOARD STREQUAL "m5sticks3")
-    list(APPEND COMPONENT_SRCS "tft_display.c" "power_manager.c")
+    list(APPEND COMPONENT_SRCS "tft_display.c" "power_manager.c" "input_mode.c" "imu_driver.c")
     list(APPEND EXTRA_REQUIRES "esp_lcd" "esp_driver_i2c")
 elseif(BOARD STREQUAL "m5stamps3")
     list(APPEND COMPONENT_SRCS "rgb_led.c")
@@ -30,6 +30,7 @@ idf_component_register(
 
 if(BOARD STREQUAL "m5sticks3")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_M5STICKS3)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE "-lm")
 elseif(BOARD STREQUAL "m5stamps3")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_M5STAMPS3)
 endif()

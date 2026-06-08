@@ -35,6 +35,8 @@ typedef struct {
     bool wifi_enabled;
     bool anti_idle_enabled;
     uint16_t anti_idle_interval_sec;
+    uint8_t input_mode;            /* 0=KVM, 1=PPT/Air Mouse */
+    uint8_t air_mouse_sensitivity; /* 1-10, default 5 */
 } kvm_config_t;
 
 void config_manager_init(void);
@@ -47,3 +49,4 @@ void config_save_auth_token(void);
 void config_save_wifi(void);
 void config_generate_auth_token(void);
 void config_save_anti_idle(void);
+void config_save_input_mode(void);

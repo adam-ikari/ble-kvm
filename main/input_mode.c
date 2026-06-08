@@ -1,0 +1,130 @@
+#include "input_mode.h"
+#if HAS_INPUT_MODES
+
+#include "config_manager.h"
+#include "ble_peripheral.h"
+#include "switch_manager.h"
+#include "imu_driver.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/i2c_master.h"
+
+static const char *TAG = "input_mode";
+static input_mode_t current_mode = INPUT_MODE_KVM;
+static TaskHandle_t air_mouse_task = NULL;
+static esp_timer_handle_t consumer_release_timer = NULL;
+
+#define CONSUMER_KEY_NEXT  0x00B5
+#define CONSUMER_KEY_PREV  0x00B6
+
+static void consumer_key_release_cb(void *arg)
+{
+    uint16_t conn = switch_manager_get_active_conn_handle();
+    if (conn) ble_peripheral_send_consumer_key(conn, 0x0000);
+}
+
+static void send_consumer_key(uint16_t usage)
+{
+    uint16_t conn = switch_manager_get_active_conn_handle();
+    if (!conn) return;
+    ble_peripheral_send_consumer_key(conn, usage);
+    esp_timer_start_once(consumer_release_timer, 50000);
+}
+
+static void air_mouse_task_func(void *arg)
+{
+    imu_cursor_t cursor;
+    while (1) {
+        if (current_mode != INPUT_MODE_PPT_AIR) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+        const kvm_config_t *cfg = config_get();
+        imu_driver_read_cursor(cfg->air_mouse_sensitivity, &cursor);
+        if (cursor.x != 0 || cursor.y != 0) {
+            uint8_t report[4] = {0x00,
+                                 (uint8_t)(cursor.x & 0xFF),
+                                 (uint8_t)(cursor.y & 0xFF),
+                                 0x00};
+            uint16_t conn = switch_manager_get_active_conn_handle();
+            if (conn) ble_peripheral_send_hid_report(conn, 2, report, 4);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+static void start_air_mouse(void)
+{
+    if (!air_mouse_task) {
+        xTaskCreate(air_mouse_task_func, "air_mouse", 3072, NULL, 2, &air_mouse_task);
+    }
+}
+
+static void stop_air_mouse(void)
+{
+    if (air_mouse_task) {
+        vTaskDelete(air_mouse_task);
+        air_mouse_task = NULL;
+    }
+}
+
+void input_mode_init(void)
+{
+    const kvm_config_t *cfg = config_get();
+    current_mode = (input_mode_t)cfg->input_mode;
+
+    esp_timer_create_args_t timer_args = {
+        .callback = consumer_key_release_cb,
+        .name = "cons_release",
+    };
+    esp_timer_create(&timer_args, &consumer_release_timer);
+
+    extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
+    i2c_master_bus_handle_t i2c = tft_display_get_i2c_bus();
+    imu_driver_init(i2c);
+
+    if (current_mode == INPUT_MODE_PPT_AIR) {
+        start_air_mouse();
+    }
+
+    ESP_LOGI(TAG, "Input mode: %d", current_mode);
+}
+
+input_mode_t input_mode_get(void)
+{
+    return current_mode;
+}
+
+void input_mode_set(input_mode_t mode)
+{
+    if (mode == current_mode) return;
+    if (current_mode == INPUT_MODE_PPT_AIR) stop_air_mouse();
+    current_mode = mode;
+    config_get_mutable()->input_mode = (uint8_t)mode;
+    config_save_input_mode();
+    if (mode == INPUT_MODE_PPT_AIR) start_air_mouse();
+    ESP_LOGI(TAG, "Mode set to %d", mode);
+}
+
+void input_mode_cycle(void)
+{
+    input_mode_set(current_mode == INPUT_MODE_KVM ? INPUT_MODE_PPT_AIR : INPUT_MODE_KVM);
+}
+
+void input_mode_on_primary_button(void)
+{
+    if (current_mode == INPUT_MODE_PPT_AIR) {
+        send_consumer_key(CONSUMER_KEY_PREV);
+    }
+}
+
+void input_mode_on_secondary_button(void)
+{
+    if (current_mode == INPUT_MODE_PPT_AIR) {
+        send_consumer_key(CONSUMER_KEY_NEXT);
+    }
+}
+
+#endif /* HAS_INPUT_MODES */

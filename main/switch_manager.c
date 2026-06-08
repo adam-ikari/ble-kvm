@@ -3,6 +3,7 @@
 #include "indicator.h"
 #include "board.h"
 #include "config_manager.h"
+#include "input_mode.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,6 +18,7 @@ static const char *TAG = "switch";
 #define CMD_SWITCH       1
 #define CMD_SECONDARY    2
 #define CMD_FACTORY_RST  3
+#define CMD_MODE_CYCLE   4
 
 #define LONG_PRESS_MS 5000
 
@@ -60,33 +62,44 @@ static void switch_task_func(void *arg)
     while (1) {
         if (xQueueReceive(switch_queue, &cmd, pdMS_TO_TICKS(100))) {
             if (cmd == CMD_SWITCH) {
-                kvm_config_t *cfg = config_get_mutable();
-                uint8_t old_pc = cfg->active_pc;
-                uint8_t new_pc = (old_pc == 1) ? 2 : 1;
+                if (input_mode_get() != INPUT_MODE_KVM) {
+                    input_mode_on_primary_button();
+                } else {
+                    kvm_config_t *cfg = config_get_mutable();
+                    uint8_t old_pc = cfg->active_pc;
+                    uint8_t new_pc = (old_pc == 1) ? 2 : 1;
 
-                if (!ble_peripheral_is_pc_connected(new_pc)) {
-                    ESP_LOGW(TAG, "PC%d not connected, cannot switch", new_pc);
+                    if (!ble_peripheral_is_pc_connected(new_pc)) {
+                        ESP_LOGW(TAG, "PC%d not connected, cannot switch", new_pc);
+                        update_led_state();
+                        continue;
+                    }
+
+                    indicator_set_state(IND_PAIRING);
+                    vTaskDelay(pdMS_TO_TICKS(100));
+
+                    cfg->active_pc = new_pc;
+                    config_save_active_pc();
+
+                    ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
                     update_led_state();
-                    continue;
                 }
-
-                indicator_set_state(IND_PAIRING);
-                vTaskDelay(pdMS_TO_TICKS(100));
-
-                cfg->active_pc = new_pc;
-                config_save_active_pc();
-
-                ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
-                update_led_state();
             }
 #if HAS_SECONDARY_BUTTON
             else if (cmd == CMD_SECONDARY) {
-                extern void tft_display_toggle_page(void);
-                tft_display_toggle_page();
+                if (input_mode_get() != INPUT_MODE_KVM) {
+                    input_mode_on_secondary_button();
+                } else {
+                    extern void tft_display_toggle_page(void);
+                    tft_display_toggle_page();
+                }
             }
 #endif
             else if (cmd == CMD_FACTORY_RST) {
                 do_factory_reset();
+            }
+            else if (cmd == CMD_MODE_CYCLE) {
+                input_mode_cycle();
             }
         } else {
             update_led_state();
@@ -131,8 +144,11 @@ static void IRAM_ATTR secondary_button_isr_handler(void *arg)
     } else if (level == 1 && sec_pending) {
         int64_t duration = now - sec_press_time;
         sec_pending = false;
-        if (duration > 50 && duration < 2000) {
+        if (duration > 50 && duration < 1000) {
             uint8_t cmd = CMD_SECONDARY;
+            xQueueSendFromISR(switch_queue, &cmd, NULL);
+        } else if (duration >= 1000 && duration < 3000) {
+            uint8_t cmd = CMD_MODE_CYCLE;
             xQueueSendFromISR(switch_queue, &cmd, NULL);
         }
     }

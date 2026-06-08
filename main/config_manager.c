@@ -84,6 +84,8 @@ static void load_wifi(void)
 
 static void load_anti_idle(void);
 
+static void load_input_mode(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
@@ -97,6 +99,7 @@ void config_manager_init(void)
     load_auth_token();
     load_wifi();
     load_anti_idle();
+    load_input_mode();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -171,5 +174,21 @@ void config_save_anti_idle(void)
     uint8_t enabled = config.anti_idle_enabled ? 1 : 0;
     ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "anti_idle", enabled));
     ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "anti_idle_ivl", config.anti_idle_interval_sec));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+static void load_input_mode(void)
+{
+    esp_err_t err = nvs_get_u8(nvs_config, "input_mode", &config.input_mode);
+    if (err != ESP_OK || config.input_mode > 1) config.input_mode = 0;
+    uint8_t sens = 0;
+    err = nvs_get_u8(nvs_config, "air_sens", &sens);
+    config.air_mouse_sensitivity = (err == ESP_OK && sens >= 1 && sens <= 10) ? sens : 5;
+}
+
+void config_save_input_mode(void)
+{
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "input_mode", config.input_mode));
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "air_sens", config.air_mouse_sensitivity));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }
