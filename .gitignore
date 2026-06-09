@@ -1,5 +1,6 @@
 build/
 sdkconfig.old
+managed_components/
 web/node_modules/
 web/dist/
 .vscode/

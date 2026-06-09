@@ -149,8 +149,7 @@ static void switch_task_func(void *arg)
             else if (cmd == CMD_VOICE_START) {
 #if HAS_VOICE_INPUT
                 if (!voice_input_is_active()) {
-                    voice_input_start();
-                    if (!voice_input_is_active()) {
+                    if (!voice_input_start()) {
                         ESP_LOGW(TAG, "Voice start failed (need WiFi/config)");
                     }
                 }

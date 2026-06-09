@@ -44,6 +44,15 @@ static void led_task(void *arg)
             toggle = !toggle;
             vTaskDelay(pdMS_TO_TICKS(500));
             break;
+        case IND_VOICE_RECORDING:
+            set_leds(true, false);  /* LED1 solid for recording */
+            vTaskDelay(pdMS_TO_TICKS(500));
+            break;
+        case IND_FACTORY_WARN:
+            set_leds(toggle, toggle);  /* both LEDs fast blink */
+            toggle = !toggle;
+            vTaskDelay(pdMS_TO_TICKS(200));
+            break;
         }
     }
 }

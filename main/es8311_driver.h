@@ -1,5 +1,6 @@
 #pragma once
 
+#include "board.h"
 #include "driver/i2c_master.h"
 
 #if HAS_VOICE_INPUT

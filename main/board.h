@@ -1,9 +1,9 @@
 #pragma once
 
 #include "driver/gpio.h"
-#include "driver/i2s_std.h"
 
 #ifdef BOARD_M5STICKS3
+  #include "driver/i2s_std.h"
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_11
   #define BUTTON_SECONDARY_GPIO  GPIO_NUM_12
   #define HAS_SECONDARY_BUTTON   1

@@ -70,6 +70,15 @@ static void rgb_task(void *arg)
             toggle = !toggle;
             vTaskDelay(pdMS_TO_TICKS(200));
             break;
+        case IND_VOICE_RECORDING:
+            send_rgb(255, 0, 0);  /* solid red for recording */
+            vTaskDelay(pdMS_TO_TICKS(500));
+            break;
+        case IND_FACTORY_WARN:
+            send_rgb(toggle ? 255 : 0, 0, 0);  /* fast blink red */
+            toggle = !toggle;
+            vTaskDelay(pdMS_TO_TICKS(200));
+            break;
         }
     }
 }

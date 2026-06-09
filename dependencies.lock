@@ -19,6 +19,16 @@ dependencies:
     - esp32h4
     - esp32s31
     version: 2.2.0
+  espressif/esp_websocket_client:
+    component_hash: 3fb288702517ef4d75bf933a115f1056ee0c2540d964f9e1d856e0bb67e1dfeb
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.0
   espressif/tinyusb:
     component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
     dependencies:
@@ -65,7 +75,8 @@ dependencies:
     version: 5.5.4
 direct_dependencies:
 - espressif/esp_tinyusb
+- espressif/esp_websocket_client
 - espressif/usb_host_hid
-manifest_hash: 8a2156a77eb06577e8f6155b7cc4e1be8f60fbc9e9178b493f155638f4489907
+manifest_hash: a239557a56b1b023e99868a31600b91245c9e63f6d22ae9392b2f82cf890ab02
 target: esp32s3
 version: 2.0.0
