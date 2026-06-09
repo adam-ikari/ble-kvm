@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README_CN.md)
 
-基于 ESP32-S3 的蓝牙 KVM（键盘-视频-鼠标）切换器。通过 BLE HID 同时连接最多三台电脑，一键切换键盘/鼠标输入。支持 USB 设备模式、USB 主机模式、WiFi Web 配置和云端语音转文字输入。
+基于 ESP32-S3 的蓝牙 KVM（键盘-视频-鼠标）切换器。最多同时连接三台电脑 —— 两台通过 BLE HID 蓝牙，一台通过 USB HID 设备模式。一键切换键盘/鼠标输入。支持 USB 设备模式、USB 主机模式、WiFi Web 配置和云端语音转文字输入。
 
 ## 支持的开发板
 
@@ -14,7 +14,7 @@
 
 ## 功能特性
 
-- **BLE HID KVM** — 通过蓝牙连接最多 3 台电脑。按下按钮即可切换当前控制的主机。键盘和鼠标输入透明路由到当前选中的连接。
+- **BLE HID KVM** — 通过蓝牙 BLE HID 连接最多 2 台电脑。第 3 台可通过 USB 设备模式连接。键盘和鼠标输入透明路由到当前选中的连接。
 - **USB 设备模式** — 通过 USB OTG 端口，以 USB HID 键盘/鼠标设备身份连接到主机。
 - **USB 主机模式** — 接受外部 USB HID 键盘/鼠标，将其输入通过 BLE 转发给已连接的电脑。
 
@@ -152,8 +152,8 @@ ble-kvm/
 | `auth_token` | 9 位随机字符 | Web 界面认证令牌 |
 | `wifi_ssid` / `wifi_password` | — | STA 模式连接凭证 |
 | `wifi_enabled` | false | 启动时是否开启 WiFi |
-| `usb_mode` | 0（禁用） | 0=仅 BLE，1=USB 设备，2=USB 主机 |
-| `active_pc` | 0 | 当前选中的电脑（0-2） |
+| `usb_mode` | 0（禁用） | 0=仅 BLE（2 台），1=USB 设备（增加第 3 台），2=USB 主机 |
+| `active_pc` | 0 | 当前选中的电脑（0-1 BLE，2 USB 设备） |
 | `anti_idle_enabled` | false | 是否定期发送 HID 保活信号 |
 | `anti_idle_interval_sec` | — | 保活信号间隔（秒） |
 | `input_mode` | 0（KVM） | 0=KVM 模式，1=PPT 空中鼠标 |

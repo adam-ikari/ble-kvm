@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README_CN.md)
 
-Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to up to three PCs simultaneously via BLE HID, switching keyboard/mouse input between them with a button press. Supports USB device mode, USB host mode, WiFi web configuration, and cloud voice-to-text input.
+Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to up to three PCs simultaneously — two via BLE HID and one via USB HID device mode. Switch active PC with a button press. Supports USB device mode, USB host mode, WiFi web configuration, and cloud voice-to-text input.
 
 ## Supported Boards
 
@@ -14,7 +14,7 @@ Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to
 
 ## Features
 
-- **BLE HID KVM** — Connect up to 3 PCs via Bluetooth. Switch active PC with a button press. Keyboard and mouse input transparently routed to the active connection.
+- **BLE HID KVM** — Connect up to 2 PCs via Bluetooth BLE HID. A 3rd PC can be connected via USB device mode. Keyboard and mouse input transparently routed to the active connection.
 - **USB Device Mode** — Appears as a USB HID keyboard/mouse to a connected host via the USB OTG port.
 - **USB Host Mode** — Accepts external USB HID keyboard/mouse, forwarding their input over BLE to connected PCs.
 
@@ -150,8 +150,8 @@ All settings are persisted in NVS flash and configurable via the web dashboard a
 | `auth_token` | 9-char random | Web UI authentication token |
 | `wifi_ssid` / `wifi_password` | — | STA mode credentials |
 | `wifi_enabled` | false | Enable WiFi on boot |
-| `usb_mode` | 0 (disabled) | 0=BLE only, 1=USB device, 2=USB host |
-| `active_pc` | 0 | Currently selected PC (0-2) |
+| `usb_mode` | 0 (disabled) | 0=BLE only (2 PCs), 1=USB device (adds 3rd PC), 2=USB host |
+| `active_pc` | 0 | Currently selected PC (0-1 BLE, 2 USB device) |
 | `anti_idle_enabled` | false | Send periodic HID keep-alive |
 | `anti_idle_interval_sec` | — | Interval between keep-alive signals |
 | `input_mode` | 0 (KVM) | 0=KVM, 1=PPT air mouse |
