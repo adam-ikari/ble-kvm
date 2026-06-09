@@ -7,6 +7,9 @@
 #if HAS_USB
 #include "usb_device.h"
 #endif
+#if HAS_VOICE_INPUT
+#include "voice_input.h"
+#endif
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,12 +21,19 @@
 
 static const char *TAG = "switch";
 
-#define CMD_SWITCH       1
-#define CMD_SECONDARY    2
-#define CMD_FACTORY_RST  3
-#define CMD_MODE_CYCLE   4
+#define CMD_SWITCH         1
+#define CMD_SECONDARY      2
+#define CMD_FACTORY_RST    3
+#define CMD_MODE_CYCLE     4
+#define CMD_VOICE_START    5
+#define CMD_VOICE_STOP     6
+#define CMD_FACTORY_WARN   7
+#define CMD_FACTORY_CANCEL 8
 
-#define LONG_PRESS_MS 5000
+#define VOICE_PRESS_MS     500
+#define MODE_CYCLE_MS      5000
+#define FACTORY_WARN_MS    5000
+#define FACTORY_RST_MS     10000
 
 static bool is_pc3_connected(void)
 {
@@ -39,6 +49,15 @@ static TaskHandle_t switch_task_handle;
 static int64_t button_press_time = 0;
 static bool button_pending = false;
 static bool long_press_triggered = false;
+
+static esp_timer_handle_t voice_start_timer;
+
+#if HAS_SECONDARY_BUTTON
+static int64_t sec_press_time = 0;
+static bool sec_pending = false;
+static bool sec_factory_warned = false;
+static esp_timer_handle_t factory_warn_timer;
+#endif
 
 static void update_led_state(void)
 {
@@ -127,9 +146,50 @@ static void switch_task_func(void *arg)
             else if (cmd == CMD_MODE_CYCLE) {
                 input_mode_cycle();
             }
+            else if (cmd == CMD_VOICE_START) {
+#if HAS_VOICE_INPUT
+                if (!voice_input_is_active()) {
+                    voice_input_start();
+                    if (!voice_input_is_active()) {
+                        ESP_LOGW(TAG, "Voice start failed (need WiFi/config)");
+                    }
+                }
+#endif
+            }
+            else if (cmd == CMD_VOICE_STOP) {
+#if HAS_VOICE_INPUT
+                if (voice_input_is_active()) {
+                    voice_input_stop();
+                }
+#endif
+            }
+            else if (cmd == CMD_FACTORY_WARN) {
+                ESP_LOGW(TAG, "Factory reset warning — hold 10s to confirm");
+                indicator_set_state(IND_PAIRING);
+            }
+            else if (cmd == CMD_FACTORY_CANCEL) {
+                ESP_LOGI(TAG, "Factory reset cancelled");
+                update_led_state();
+            }
         } else {
             update_led_state();
         }
+    }
+}
+
+static void voice_start_timer_cb(void *arg)
+{
+    if (!button_pending) {
+        esp_timer_stop(voice_start_timer);
+        return;
+    }
+    int64_t now = esp_timer_get_time() / 1000;
+    int64_t duration = now - button_press_time;
+    if (duration >= VOICE_PRESS_MS && !long_press_triggered) {
+        long_press_triggered = true;
+        uint8_t cmd = CMD_VOICE_START;
+        xQueueSendFromISR(switch_queue, &cmd, NULL);
+        esp_timer_stop(voice_start_timer);
     }
 }
 
@@ -142,38 +202,68 @@ static void IRAM_ATTR button_isr_handler(void *arg)
         button_press_time = now;
         button_pending = true;
         long_press_triggered = false;
+        esp_timer_start_periodic(voice_start_timer, 50000);  /* 50ms */
     } else if (level == 1 && button_pending) {
-        int64_t duration = now - button_press_time;
         button_pending = false;
+        esp_timer_stop(voice_start_timer);
 
-        if (duration >= LONG_PRESS_MS) {
-            uint8_t cmd = CMD_FACTORY_RST;
+        if (long_press_triggered) {
+            uint8_t cmd = CMD_VOICE_STOP;
             xQueueSendFromISR(switch_queue, &cmd, NULL);
-        } else if (duration > 50) {
-            uint8_t cmd = CMD_SWITCH;
-            xQueueSendFromISR(switch_queue, &cmd, NULL);
+        } else {
+            int64_t duration = now - button_press_time;
+            if (duration > 50) {
+                uint8_t cmd = CMD_SWITCH;
+                xQueueSendFromISR(switch_queue, &cmd, NULL);
+            }
         }
     }
 }
 
 #if HAS_SECONDARY_BUTTON
+static void factory_warn_timer_cb(void *arg)
+{
+    if (!sec_pending) {
+        esp_timer_stop(factory_warn_timer);
+        return;
+    }
+    int64_t now = esp_timer_get_time() / 1000;
+    int64_t duration = now - sec_press_time;
+
+    if (duration >= FACTORY_RST_MS) {
+        uint8_t cmd = CMD_FACTORY_RST;
+        xQueueSendFromISR(switch_queue, &cmd, NULL);
+        sec_pending = false;
+        esp_timer_stop(factory_warn_timer);
+    } else if (duration >= FACTORY_WARN_MS && !sec_factory_warned) {
+        sec_factory_warned = true;
+        uint8_t cmd = CMD_FACTORY_WARN;
+        xQueueSendFromISR(switch_queue, &cmd, NULL);
+    }
+}
+
 static void IRAM_ATTR secondary_button_isr_handler(void *arg)
 {
-    static int64_t sec_press_time = 0;
-    static bool sec_pending = false;
     int64_t now = esp_timer_get_time() / 1000;
     int level = gpio_get_level(BUTTON_SECONDARY_GPIO);
 
     if (level == 0 && !sec_pending) {
         sec_press_time = now;
         sec_pending = true;
+        sec_factory_warned = false;
+        esp_timer_start_periodic(factory_warn_timer, 200000);  /* 200ms */
     } else if (level == 1 && sec_pending) {
         int64_t duration = now - sec_press_time;
         sec_pending = false;
-        if (duration > 50 && duration < 1000) {
+        esp_timer_stop(factory_warn_timer);
+
+        if (sec_factory_warned) {
+            uint8_t cmd = CMD_FACTORY_CANCEL;
+            xQueueSendFromISR(switch_queue, &cmd, NULL);
+        } else if (duration > 50 && duration < 1000) {
             uint8_t cmd = CMD_SECONDARY;
             xQueueSendFromISR(switch_queue, &cmd, NULL);
-        } else if (duration >= 1000 && duration < 3000) {
+        } else if (duration >= 1000 && duration < MODE_CYCLE_MS) {
             uint8_t cmd = CMD_MODE_CYCLE;
             xQueueSendFromISR(switch_queue, &cmd, NULL);
         }
@@ -209,6 +299,20 @@ void switch_manager_init(void)
     };
     gpio_config(&io2);
     gpio_isr_handler_add(BUTTON_SECONDARY_GPIO, secondary_button_isr_handler, NULL);
+#endif
+
+    const esp_timer_create_args_t voice_timer_args = {
+        .name = "voice_start",
+        .callback = voice_start_timer_cb,
+    };
+    esp_timer_create(&voice_timer_args, &voice_start_timer);
+
+#if HAS_SECONDARY_BUTTON
+    const esp_timer_create_args_t factory_timer_args = {
+        .name = "factory_warn",
+        .callback = factory_warn_timer_cb,
+    };
+    esp_timer_create(&factory_timer_args, &factory_warn_timer);
 #endif
 
     ESP_LOGI(TAG, "Switch manager initialized");
