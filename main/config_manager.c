@@ -89,6 +89,8 @@ static void load_input_mode(void);
 
 static void load_usb_mode(void);
 
+static void load_voice(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
@@ -104,6 +106,7 @@ void config_manager_init(void)
     load_anti_idle();
     load_input_mode();
     load_usb_mode();
+    load_voice();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -208,5 +211,40 @@ static void load_usb_mode(void)
 void config_save_usb_mode(void)
 {
     ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "usb_mode", config.usb_mode));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+static void load_voice(void)
+{
+    uint8_t enabled = 0;
+    esp_err_t err = nvs_get_u8(nvs_config, "voice_en", &enabled);
+    config.voice_asr_enabled = (err == ESP_OK) ? (enabled ? true : false) : false;
+
+    err = nvs_get_u32(nvs_config, "voice_appid", &config.voice_asr_appid);
+    if (err != ESP_OK) config.voice_asr_appid = 0;
+
+    size_t required_size = sizeof(config.voice_asr_api_key);
+    err = nvs_get_str(nvs_config, "voice_ak", config.voice_asr_api_key, &required_size);
+    if (err != ESP_OK) config.voice_asr_api_key[0] = '\0';
+
+    required_size = sizeof(config.voice_lang);
+    err = nvs_get_str(nvs_config, "voice_lang", config.voice_lang, &required_size);
+    if (err != ESP_OK) {
+        strncpy(config.voice_lang, "zh", sizeof(config.voice_lang));
+    }
+
+    uint8_t im = 0;
+    err = nvs_get_u8(nvs_config, "voice_im", &im);
+    config.voice_input_mode = (err == ESP_OK && im <= 2) ? im : 0;
+}
+
+void config_save_voice(void)
+{
+    uint8_t enabled = config.voice_asr_enabled ? 1 : 0;
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "voice_en", enabled));
+    ESP_ERROR_CHECK(nvs_set_u32(nvs_config, "voice_appid", config.voice_asr_appid));
+    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "voice_ak", config.voice_asr_api_key));
+    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "voice_lang", config.voice_lang));
+    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "voice_im", config.voice_input_mode));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }

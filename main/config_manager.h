@@ -42,6 +42,11 @@ typedef struct {
     uint16_t anti_idle_interval_sec;
     uint8_t input_mode;            /* 0=KVM, 1=PPT/Air Mouse */
     uint8_t air_mouse_sensitivity; /* 1-10, default 5 */
+    bool voice_asr_enabled;           /* default: false */
+    uint32_t voice_asr_appid;         /* Baidu App ID */
+    char voice_asr_api_key[65];       /* Baidu API Key (appkey) */
+    char voice_lang[8];               /* "zh" or "en", default: "zh" */
+    uint8_t voice_input_mode;         /* 0=auto, 1=pinyin, 2=ascii */
 } kvm_config_t;
 
 void config_manager_init(void);
@@ -56,3 +61,4 @@ void config_generate_auth_token(void);
 void config_save_anti_idle(void);
 void config_save_input_mode(void);
 void config_save_usb_mode(void);
+void config_save_voice(void);
