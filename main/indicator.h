@@ -6,6 +6,8 @@ typedef enum {
     IND_PC3_ACTIVE,
     IND_NO_PC,
     IND_PAIRING,
+    IND_VOICE_RECORDING,
+    IND_FACTORY_WARN,
 } indicator_state_t;
 
 void indicator_init(void);

@@ -20,6 +20,7 @@
 #include "wifi_manager.h"
 #include "input_mode.h"
 #include "imu_driver.h"
+#include "voice_input.h"
 #if HAS_USB
 #include "usb_device.h"
 #include "usb_host.h"
@@ -261,10 +262,37 @@ static void draw_debug_page(void)
     flush_fb();
 }
 
+static void draw_factory_warn_page(void)
+{
+    memset(fb, 0, sizeof(fb));
+    /* Red warning background */
+    fill_rect(0, 0, TFT_WIDTH, TFT_HEIGHT, RGB565(80, 0, 0));
+    draw_str(20, 60, "Hold 10s", COLOR_RED, RGB565(80, 0, 0));
+    draw_str(8, 80, "Factory Reset", COLOR_RED, RGB565(80, 0, 0));
+    flush_fb();
+}
+
+static void draw_voice_recording_page(void)
+{
+    memset(fb, 0, sizeof(fb));
+    /* Recording indicator */
+    draw_str(40, 60, "REC", COLOR_RED, COLOR_BG);
+    /* Microphone icon (simple representation) */
+    fill_rect(60, 80, 20, 30, COLOR_FG);
+    fill_rect(63, 85, 14, 20, COLOR_BG);
+    fill_rect(55, 95, 30, 5, COLOR_FG);
+    flush_fb();
+}
+
 static void tft_task(void *arg)
 {
     while (1) {
-        if (current_page == 0) {
+        /* Check for special indicator states that override normal pages */
+        if (current_state == IND_FACTORY_WARN) {
+            draw_factory_warn_page();
+        } else if (current_state == IND_VOICE_RECORDING) {
+            draw_voice_recording_page();
+        } else if (current_page == 0) {
             draw_status_page();
         } else {
             draw_debug_page();
