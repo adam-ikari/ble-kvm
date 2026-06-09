@@ -5,14 +5,14 @@ endif()
 set(COMPONENT_SRCS
     "main.c" "config_manager.c" "ble_peripheral.c"
     "switch_manager.c" "hid_router.c" "ble_central.c"
-    "wifi_manager.c" "web_server.c"
+    "wifi_manager.c" "web_server.c" "web_log.c"
     "indicator.c" "anti_idle.c"
 )
 
 set(EXTRA_REQUIRES "")
 
 if(BOARD STREQUAL "m5sticks3")
-    list(APPEND COMPONENT_SRCS "tft_display.c" "power_manager.c" "input_mode.c" "imu_driver.c")
+    list(APPEND COMPONENT_SRCS "tft_display.c" "power_manager.c" "input_mode.c" "imu_driver.c" "es8311_driver.c" "mic_driver.c" "voice_input.c")
     list(APPEND EXTRA_REQUIRES "esp_lcd" "esp_driver_i2c")
 elseif(BOARD STREQUAL "m5stamps3")
     list(APPEND COMPONENT_SRCS "rgb_led.c")

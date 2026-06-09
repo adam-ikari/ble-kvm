@@ -22,6 +22,12 @@
 #include "power_manager.h"
 #endif
 #include "web_server.h"
+#include "web_log.h"
+#if HAS_VOICE_INPUT
+#include "es8311_driver.h"
+#include "mic_driver.h"
+#include "voice_input.h"
+#endif
 
 static const char *TAG = "main";
 
@@ -59,6 +65,18 @@ void app_main(void)
     config_manager_init();
 
     const kvm_config_t *cfg = config_get();
+    web_log_init();
+
+#if HAS_VOICE_INPUT
+    if (cfg->voice_asr_enabled && cfg->voice_asr_appid != 0) {
+        extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
+        i2c_master_bus_handle_t i2c_bus = tft_display_get_i2c_bus();
+        es8311_init(i2c_bus);
+        mic_driver_init();
+        voice_input_init();
+        ESP_LOGI(TAG, "Voice input initialized");
+    }
+#endif
 
 #if HAS_USB
     if (cfg->usb_mode == USB_MODE_DEVICE) {
