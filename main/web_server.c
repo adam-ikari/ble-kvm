@@ -12,7 +12,6 @@
 #endif
 #include "web_log.h"
 #include "voice_input.h"
-#include "nvs_flash.h"
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -855,47 +854,6 @@ void web_server_notify_device(const char *device_type, bool connected)
     sse_broadcast("device", data);
 }
 
-/* ── Endpoint: POST /api/factory-reset ───────────────────────────── */
-
-static esp_err_t factory_reset_handler(httpd_req_t *req)
-{
-    if (!check_auth(req)) return ESP_FAIL;
-
-    char buf[64] = {0};
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
-        return ESP_FAIL;
-    }
-
-    cJSON *body = cJSON_Parse(buf);
-    if (!body) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
-
-    cJSON *confirm = cJSON_GetObjectItem(body, "confirm");
-    if (!cJSON_IsTrue(confirm)) {
-        cJSON_Delete(body);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "confirm must be true");
-        return ESP_FAIL;
-    }
-    cJSON_Delete(body);
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "ok", true);
-    char *json = cJSON_PrintUnformatted(root);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json);
-    cJSON_free(json);
-    cJSON_Delete(root);
-
-    vTaskDelay(pdMS_TO_TICKS(500));
-    nvs_flash_erase();
-    esp_restart();
-    return ESP_OK;
-}
-
 /* ── URI registration table ───────────────────────────────────────── */
 
 static const httpd_uri_t uris[] = {
@@ -913,7 +871,6 @@ static const httpd_uri_t uris[] = {
     { .uri = "/api/settings",   .method = HTTP_GET,    .handler = settings_get_handler },
     { .uri = "/api/settings",   .method = HTTP_PATCH,  .handler = settings_patch_handler },
     { .uri = "/api/logs",       .method = HTTP_GET,    .handler = logs_handler },
-    { .uri = "/api/factory-reset", .method = HTTP_POST, .handler = factory_reset_handler },
 };
 
 #define NUM_URIS (sizeof(uris) / sizeof(uris[0]))

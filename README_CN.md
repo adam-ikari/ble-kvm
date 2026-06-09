@@ -31,7 +31,7 @@
 - **双按钮操作** — 主按钮：短按切换电脑，长按启动语音输入。副按钮：短按切换输入模式，长按 5 秒提示恢复出厂，长按 10 秒执行。
 - **防空闲** — 定期发送 HID 保活信号，防止主机休眠或锁屏。
 - **Web 调试日志** — 通过 SSE 在 Web 仪表板上实时查看 ESP-IDF 日志输出。默认关闭，可在设置中开启。
-- **恢复出厂设置** — 通过副按钮长按 10 秒或 `POST /api/factory-reset` 接口（需 `{"confirm": true}`）。清除所有 NVS 设置并重启。
+- **恢复出厂设置** — 通过副按钮长按 10 秒。清除所有 NVS 设置并重启。
 
 ## 环境准备
 
@@ -174,7 +174,6 @@ Web 服务器提供 REST API（所有接口需要 `Authorization: Bearer <token>
 | `GET` | `/api/settings` | 全部配置项 |
 | `PATCH` | `/api/settings` | 修改配置 |
 | `POST` | `/api/switch` | 切换当前活动电脑 |
-| `POST` | `/api/factory-reset` | 清除所有 NVS 数据并重启（需 `{"confirm": true}`） |
 | `GET` | `/api/logs` | SSE 实时 ESP-IDF 日志流 |
 
 ## 语音输入（M5StickS3 专属）
@@ -211,11 +210,7 @@ SPM1423 MEMS 麦克风（模拟）→ ES8311 ADC → I2S → ESP32-S3
 
 ## 恢复出厂设置
 
-**方式一 —— 按键（M5StickS3）：** 长按副按钮 5 秒（TFT 显示警告提示），继续按住 5 秒（共 10 秒）确认执行。
-
-**方式二 —— Web API：** `POST /api/factory-reset`，请求体 `{"confirm": true}`，需要有效的认证令牌。
-
-两种方式均会清除所有 NVS 数据并重启设备。
+长按副按钮 5 秒（TFT 显示警告提示），继续按住 5 秒（共 10 秒）确认执行，清除所有 NVS 数据并重启设备。
 
 ## 许可证
 

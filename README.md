@@ -31,7 +31,7 @@ Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to
 - **Two-Button UI** — Primary button: short-press switches PCs, long-press starts voice input. Secondary button: short-press cycles input modes, 5s-long-press warns factory reset, 10s executes.
 - **Anti-Idle** — Periodic HID keep-alive signals to prevent host sleep/lock.
 - **Web Debug Log** — Real-time ESP-IDF log streaming over SSE on the web dashboard. Disabled by default, toggle in settings.
-- **Factory Reset** — Via secondary button (10s hold) or `POST /api/factory-reset` with `{"confirm": true}`. Erases all NVS settings and reboots.
+- **Factory Reset** — Via secondary button (10s hold). Erases all NVS settings and reboots.
 
 ## Prerequisites
 
@@ -172,7 +172,6 @@ The web server exposes a REST API (all endpoints require `Authorization: Bearer 
 | `GET` | `/api/settings` | All configuration values |
 | `PATCH` | `/api/settings` | Update configuration |
 | `POST` | `/api/switch` | Switch active PC |
-| `POST` | `/api/factory-reset` | Erase NVS and reboot (`{"confirm": true}`) |
 | `GET` | `/api/logs` | SSE stream of real-time ESP-IDF logs |
 
 ## Voice Input (M5StickS3)
@@ -211,9 +210,7 @@ SPM1423 MEMS Mic (analog) → ES8311 ADC → I2S → ESP32-S3
 
 **Method 1 — Button (M5StickS3):** Hold the secondary button for 5 seconds (TFT shows warning), continue holding for another 5 seconds (10s total) to execute.
 
-**Method 2 — Web API:** `POST /api/factory-reset` with body `{"confirm": true}` and valid auth token.
-
-Both methods erase all NVS data and reboot the device.
+Hold the secondary button for 5 seconds (TFT shows warning), continue holding for another 5 seconds (10s total) to erase all NVS data and reboot.
 
 ## License
 
