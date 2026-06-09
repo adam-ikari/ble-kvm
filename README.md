@@ -1,5 +1,7 @@
 # BLE-KVM
 
+[English](README.md) | [中文](README_CN.md)
+
 Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to up to three PCs simultaneously via BLE HID, switching keyboard/mouse input between them with a button press. Supports USB device mode, USB host mode, WiFi web configuration, and cloud voice-to-text input.
 
 ## Supported Boards

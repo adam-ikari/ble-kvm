@@ -1,5 +1,7 @@
 # BLE-KVM
 
+[English](README.md) | [中文](README_CN.md)
+
 基于 ESP32-S3 的蓝牙 KVM（键盘-视频-鼠标）切换器。通过 BLE HID 同时连接最多三台电脑，一键切换键盘/鼠标输入。支持 USB 设备模式、USB 主机模式、WiFi Web 配置和云端语音转文字输入。
 
 ## 支持的开发板
