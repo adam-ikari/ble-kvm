@@ -10,6 +10,9 @@
 #include "usb_device.h"
 #include "usb_host.h"
 #endif
+#include "web_log.h"
+#include "voice_input.h"
+#include "nvs_flash.h"
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -217,6 +220,7 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(usb, "mode", "disabled");
 #endif
     cJSON_AddItemToObject(root, "usb", usb);
+    cJSON_AddBoolToObject(root, "voice_recording", voice_input_is_active());
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -242,6 +246,91 @@ static esp_err_t switch_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, json);
     cJSON_free(json);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ── Endpoint: GET /api/logs (SSE, live only) ─────────────────────── */
+
+#define MAX_LOG_CLIENTS 2
+typedef struct {
+    httpd_handle_t hd;
+    int fd;
+    bool active;
+} log_client_t;
+
+static log_client_t log_clients[MAX_LOG_CLIENTS];
+static SemaphoreHandle_t log_mutex = NULL;
+
+static void log_sse_broadcast(const char *event, const char *data)
+{
+    if (!log_mutex) return;
+    xSemaphoreTake(log_mutex, portMAX_DELAY);
+    for (int i = 0; i < MAX_LOG_CLIENTS; i++) {
+        if (!log_clients[i].active) continue;
+        /* Build SSE packet with multi-line data support:
+         * data may contain \r (from web_log replacing \n) —
+         * split each \r into separate data: lines */
+        char pkt[320];
+        int pos = snprintf(pkt, sizeof(pkt), "event: %s\n", event);
+        const char *p = data;
+        while (*p) {
+            const char *next = strchr(p, '\r');
+            if (next) {
+                int seg_len = (int)(next - p);
+                pos += snprintf(pkt + pos, sizeof(pkt) - pos, "data: %.*s\n", seg_len, p);
+                p = next + 1;
+            } else {
+                pos += snprintf(pkt + pos, sizeof(pkt) - pos, "data: %s\n", p);
+                break;
+            }
+        }
+        pos += snprintf(pkt + pos, sizeof(pkt) - pos, "\n");
+        int sent = httpd_socket_send(log_clients[i].hd, log_clients[i].fd, pkt, pos, 0);
+        if (sent < 0) {
+            log_clients[i].active = false;
+        }
+    }
+    xSemaphoreGive(log_mutex);
+}
+
+static esp_err_t logs_handler(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_FAIL;
+    if (!web_log_is_enabled()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Web log is disabled");
+        return ESP_FAIL;
+    }
+
+    xSemaphoreTake(log_mutex, portMAX_DELAY);
+    int slot = -1;
+    for (int i = 0; i < MAX_LOG_CLIENTS; i++) {
+        if (!log_clients[i].active) { slot = i; break; }
+    }
+    if (slot < 0) {
+        xSemaphoreGive(log_mutex);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Too many log clients");
+        return ESP_FAIL;
+    }
+    log_clients[slot].hd = req->handle;
+    log_clients[slot].fd = httpd_req_to_sockfd(req);
+    log_clients[slot].active = true;
+    xSemaphoreGive(log_mutex);
+
+    httpd_resp_set_type(req, "text/event-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Connection", "keep-alive");
+    httpd_resp_sendstr(req, "event: connected\ndata: {}\n\n");
+
+    /* Block until client disconnects */
+    char buf[1];
+    while (recv(httpd_req_to_sockfd(req), buf, 1, MSG_PEEK | MSG_DONTWAIT) >= 0
+           || errno == EAGAIN || errno == EWOULDBLOCK) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    xSemaphoreTake(log_mutex, portMAX_DELAY);
+    log_clients[slot].active = false;
+    xSemaphoreGive(log_mutex);
     return ESP_OK;
 }
 
@@ -556,6 +645,21 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "usb_mode", cfg->usb_mode);
     cJSON_AddStringToObject(root, "keyboard_name", cfg->keyboard.name[0] ? cfg->keyboard.name : "");
     cJSON_AddStringToObject(root, "mouse_name", cfg->mouse.name[0] ? cfg->mouse.name : "");
+    cJSON_AddBoolToObject(root, "web_log_enabled", web_log_is_enabled());
+    cJSON_AddBoolToObject(root, "voice_asr_enabled", cfg->voice_asr_enabled);
+    cJSON_AddNumberToObject(root, "voice_asr_appid", cfg->voice_asr_appid);
+    if (cfg->voice_asr_api_key[0]) {
+        int klen = strlen(cfg->voice_asr_api_key);
+        int show = klen > 4 ? 4 : klen;
+        char masked[65] = {0};
+        memset(masked, '*', klen - show);
+        memcpy(masked + klen - show, cfg->voice_asr_api_key + klen - show, show);
+        cJSON_AddStringToObject(root, "voice_asr_api_key", masked);
+    } else {
+        cJSON_AddStringToObject(root, "voice_asr_api_key", "");
+    }
+    cJSON_AddStringToObject(root, "voice_lang", cfg->voice_lang);
+    cJSON_AddNumberToObject(root, "voice_input_mode", cfg->voice_input_mode);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -671,6 +775,48 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
         config_save_input_devices();
     }
 
+    cJSON *web_log_item = cJSON_GetObjectItem(body, "web_log_enabled");
+    if (cJSON_IsBool(web_log_item)) {
+        if (cJSON_IsTrue(web_log_item)) {
+            web_log_enable();
+        } else {
+            web_log_disable();
+        }
+    }
+
+    cJSON *voice_en_item = cJSON_GetObjectItem(body, "voice_asr_enabled");
+    if (cJSON_IsBool(voice_en_item)) {
+        cfg->voice_asr_enabled = cJSON_IsTrue(voice_en_item);
+    }
+
+    cJSON *voice_appid_item = cJSON_GetObjectItem(body, "voice_asr_appid");
+    if (cJSON_IsNumber(voice_appid_item)) {
+        cfg->voice_asr_appid = (uint32_t)voice_appid_item->valuedouble;
+    }
+
+    cJSON *voice_ak_item = cJSON_GetObjectItem(body, "voice_asr_api_key");
+    if (cJSON_IsString(voice_ak_item) && strlen(voice_ak_item->valuestring) > 0) {
+        if (strncmp(voice_ak_item->valuestring, "****", 4) != 0) {
+            strncpy(cfg->voice_asr_api_key, voice_ak_item->valuestring, 64);
+            cfg->voice_asr_api_key[64] = '\0';
+        }
+    }
+
+    cJSON *voice_lang_item = cJSON_GetObjectItem(body, "voice_lang");
+    if (cJSON_IsString(voice_lang_item)) {
+        strncpy(cfg->voice_lang, voice_lang_item->valuestring, sizeof(cfg->voice_lang) - 1);
+    }
+
+    cJSON *voice_im_item = cJSON_GetObjectItem(body, "voice_input_mode");
+    if (cJSON_IsNumber(voice_im_item)) {
+        int val = voice_im_item->valueint;
+        if (val >= 0 && val <= 2) cfg->voice_input_mode = (uint8_t)val;
+    }
+
+    if (voice_en_item || voice_appid_item || voice_ak_item || voice_lang_item || voice_im_item) {
+        config_save_voice();
+    }
+
     cJSON_Delete(body);
 
     cJSON *root = cJSON_CreateObject();
@@ -709,6 +855,47 @@ void web_server_notify_device(const char *device_type, bool connected)
     sse_broadcast("device", data);
 }
 
+/* ── Endpoint: POST /api/factory-reset ───────────────────────────── */
+
+static esp_err_t factory_reset_handler(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_FAIL;
+
+    char buf[64] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+        return ESP_FAIL;
+    }
+
+    cJSON *body = cJSON_Parse(buf);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *confirm = cJSON_GetObjectItem(body, "confirm");
+    if (!cJSON_IsTrue(confirm)) {
+        cJSON_Delete(body);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "confirm must be true");
+        return ESP_FAIL;
+    }
+    cJSON_Delete(body);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    cJSON_Delete(root);
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    nvs_flash_erase();
+    esp_restart();
+    return ESP_OK;
+}
+
 /* ── URI registration table ───────────────────────────────────────── */
 
 static const httpd_uri_t uris[] = {
@@ -725,6 +912,8 @@ static const httpd_uri_t uris[] = {
     { .uri = "/api/wifi",       .method = HTTP_PATCH,  .handler = wifi_patch_handler },
     { .uri = "/api/settings",   .method = HTTP_GET,    .handler = settings_get_handler },
     { .uri = "/api/settings",   .method = HTTP_PATCH,  .handler = settings_patch_handler },
+    { .uri = "/api/logs",       .method = HTTP_GET,    .handler = logs_handler },
+    { .uri = "/api/factory-reset", .method = HTTP_POST, .handler = factory_reset_handler },
 };
 
 #define NUM_URIS (sizeof(uris) / sizeof(uris[0]))
@@ -736,8 +925,11 @@ void web_server_init(void)
     sse_mutex = xSemaphoreCreateMutex();
     memset(sse_clients, 0, sizeof(sse_clients));
 
+    log_mutex = xSemaphoreCreateMutex();
+    memset(log_clients, 0, sizeof(log_clients));
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = NUM_URIS + 2;  /* a little headroom */
+    config.max_uri_handlers = NUM_URIS + 4;  /* a little headroom */
     config.stack_size = 8192;
 
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -757,6 +949,9 @@ void web_server_init(void)
     };
     esp_timer_create(&timer_args, &keepalive_timer);
     esp_timer_start_periodic(keepalive_timer, SSE_KEEPALIVE_INTERVAL_MS * 1000);
+
+    /* Register log SSE broadcast so web_log can push to log clients */
+    web_log_register_sse_broadcast(log_sse_broadcast);
 
     ESP_LOGI(TAG, "Web server started on port %d", config.server_port);
 }
