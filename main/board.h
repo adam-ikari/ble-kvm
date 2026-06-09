@@ -1,6 +1,7 @@
 #pragma once
 
 #include "driver/gpio.h"
+#include "driver/i2s_std.h"
 
 #ifdef BOARD_M5STICKS3
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_11
@@ -26,6 +27,13 @@
   #define HAS_INPUT_MODES        1
   #define IMU_I2C_ADDR           0x68
   #define HAS_USB                1
+  #define HAS_VOICE_INPUT     1
+  #define MIC_I2S_PORT        I2S_NUM_1
+  #define MIC_I2S_MCK_GPIO    GPIO_NUM_18
+  #define MIC_I2S_BCK_GPIO    GPIO_NUM_17
+  #define MIC_I2S_WS_GPIO     GPIO_NUM_15
+  #define MIC_I2S_DATA_GPIO   GPIO_NUM_16
+  #define ES8311_I2C_ADDR     0x18
 
 #elif defined(BOARD_M5STAMPS3)
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_0
@@ -36,6 +44,7 @@
   #define HAS_TFT_DISPLAY        0
   #define HAS_BATTERY            0
   #define HAS_USB                1
+  #define HAS_VOICE_INPUT     0
 
 #else
   #define BUTTON_SWITCH_GPIO     GPIO_NUM_0
@@ -47,4 +56,5 @@
   #define HAS_TFT_DISPLAY        0
   #define HAS_BATTERY            0
   #define HAS_USB                0
+  #define HAS_VOICE_INPUT     0
 #endif
