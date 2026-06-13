@@ -12,6 +12,9 @@
 #endif
 #include "web_log.h"
 #include "voice_input.h"
+#if HAS_BATTERY
+#include "power_manager.h"
+#endif
 #include "web_dist_gz.h"
 #include <esp_http_server.h>
 #include "esp_log.h"
@@ -21,6 +24,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include "esp_system.h"
+#include "nvs_flash.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t server = NULL;
@@ -40,24 +44,18 @@ static SemaphoreHandle_t sse_mutex = NULL;
 
 /* ── Auth ─────────────────────────────────────────────────────────── */
 
+static bool web_authorized = false;
+
+void web_server_grant_auth(void)
+{
+    web_authorized = true;
+    ESP_LOGI(TAG, "Web access granted");
+}
+
 static bool check_auth(httpd_req_t *req)
 {
-    char auth_header[64] = {0};
-    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, sizeof(auth_header)) == ESP_OK) {
-        const char *token = config_get()->auth_token;
-        char expected[64];
-        snprintf(expected, sizeof(expected), "Bearer %s", token);
-        if (strcmp(auth_header, expected) == 0) return true;
-    }
-    /* Check query param for SSE */
-    char query[64] = {0};
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        char token_param[32] = {0};
-        if (httpd_query_key_value(query, "token", token_param, sizeof(token_param)) == ESP_OK) {
-            if (strcmp(token_param, config_get()->auth_token) == 0) return true;
-        }
-    }
-    httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
+    if (web_authorized) return true;
+    httpd_resp_sendstr(req, "{\"status\":\"waiting\",\"message\":\"Double-click the device button to authorize\"}");
     return false;
 }
 
@@ -67,6 +65,10 @@ static void sse_send_to_client(sse_client_t *client, const char *event, const ch
 {
     char pkt[256];
     int len = snprintf(pkt, sizeof(pkt), "event: %s\ndata: %s\n\n", event, data);
+    if (len < 0 || len >= (int)sizeof(pkt)) {
+        len = (int)sizeof(pkt) - 1;
+        pkt[len] = '\0';
+    }
     httpd_socket_send(client->hd, client->fd, pkt, len, 0);
 }
 
@@ -125,9 +127,49 @@ static void sse_remove_client(int fd)
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "Root request, sending %u bytes gzip", web_dist_index_gz_len);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
-    httpd_resp_send(req, (const char *)web_dist_index_html_gz, web_dist_index_html_gz_len);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+
+    /* Send in 4 KB chunks to avoid overflowing the TCP send buffer (16 KB).
+     * httpd_resp_send() pushes everything at once and blocks when the buffer
+     * is full, causing the client to time out and disconnect (ECONNRESET). */
+    esp_err_t err;
+    const char *data = (const char *)web_dist_index_gz;
+    size_t remaining = web_dist_index_gz_len;
+    size_t offset = 0;
+
+    while (remaining > 0) {
+        size_t chunk = (remaining > 4096) ? 4096 : remaining;
+        err = httpd_resp_send_chunk(req, data + offset, chunk);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send HTML chunk at offset %u: %s",
+                     (unsigned)offset, esp_err_to_name(err));
+            return err;
+        }
+        offset += chunk;
+        remaining -= chunk;
+    }
+
+    /* Signal end of chunked response */
+    err = httpd_resp_send_chunk(req, NULL, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send HTML terminator: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+/* ── Endpoint: GET /api/auth-check ────────────────────────────────── */
+
+static esp_err_t auth_check_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    if (web_authorized) {
+        httpd_resp_sendstr(req, "{\"authorized\":true}");
+    } else {
+        httpd_resp_sendstr(req, "{\"authorized\":false,\"message\":\"Double-click the device button to authorize\"}");
+    }
     return ESP_OK;
 }
 
@@ -135,7 +177,7 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     const kvm_config_t *cfg = config_get();
     cJSON *root = cJSON_CreateObject();
@@ -155,7 +197,7 @@ static esp_err_t status_handler(httpd_req_t *req)
             connected = false;
 #endif
         } else {
-            connected = ble_peripheral_is_pc_connected(i + 1);
+            connected = ble_peripheral_is_pc_connected(i);  /* 0-indexed */
         }
         cJSON_AddBoolToObject(pc, "connected", connected);
         cJSON_AddStringToObject(pc, "type", (i == 2) ? "usb" : "ble");
@@ -233,9 +275,16 @@ static esp_err_t status_handler(httpd_req_t *req)
 
 static esp_err_t switch_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
+
+#if HAS_BATTERY
+    pm_sleep_on_activity();
+#endif
 
     switch_manager_request_switch();
+
+    /* Give the switch task time to process the command */
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
@@ -271,19 +320,28 @@ static void log_sse_broadcast(const char *event, const char *data)
          * split each \r into separate data: lines */
         char pkt[320];
         int pos = snprintf(pkt, sizeof(pkt), "event: %s\n", event);
+        if (pos < 0 || pos >= (int)sizeof(pkt)) continue;
         const char *p = data;
         while (*p) {
             const char *next = strchr(p, '\r');
             if (next) {
                 int seg_len = (int)(next - p);
-                pos += snprintf(pkt + pos, sizeof(pkt) - pos, "data: %.*s\n", seg_len, p);
+                int remaining = (int)sizeof(pkt) - pos;
+                if (remaining <= 0) break;
+                pos += snprintf(pkt + pos, remaining, "data: %.*s\n", seg_len, p);
                 p = next + 1;
             } else {
-                pos += snprintf(pkt + pos, sizeof(pkt) - pos, "data: %s\n", p);
+                int remaining = (int)sizeof(pkt) - pos;
+                if (remaining > 0) {
+                    pos += snprintf(pkt + pos, remaining, "data: %s\n", p);
+                }
                 break;
             }
+            if (pos < 0 || pos >= (int)sizeof(pkt)) break;
         }
-        pos += snprintf(pkt + pos, sizeof(pkt) - pos, "\n");
+        if (pos >= 0 && pos < (int)sizeof(pkt)) {
+            snprintf(pkt + pos, sizeof(pkt) - pos, "\n");
+        }
         int sent = httpd_socket_send(log_clients[i].hd, log_clients[i].fd, pkt, pos, 0);
         if (sent < 0) {
             log_clients[i].active = false;
@@ -294,7 +352,7 @@ static void log_sse_broadcast(const char *event, const char *data)
 
 static esp_err_t logs_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
     if (!web_log_is_enabled()) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Web log is disabled");
         return ESP_FAIL;
@@ -320,10 +378,16 @@ static esp_err_t logs_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Connection", "keep-alive");
     httpd_resp_sendstr(req, "event: connected\ndata: {}\n\n");
 
-    /* Block until client disconnects */
+    /* Block until client disconnects.
+     * recv(MSG_PEEK|MSG_DONTWAIT) returns:
+     *   > 0  → data available, client still connected
+     *   = 0  → EOF, client disconnected cleanly
+     *   < 0  → error; EAGAIN/EWOULDBLOCK means no data yet (client still connected) */
     char buf[1];
-    while (recv(httpd_req_to_sockfd(req), buf, 1, MSG_PEEK | MSG_DONTWAIT) >= 0
-           || errno == EAGAIN || errno == EWOULDBLOCK) {
+    for (;;) {
+        int ret = recv(httpd_req_to_sockfd(req), buf, 1, MSG_PEEK | MSG_DONTWAIT);
+        if (ret == 0) break;  /* Client disconnected */
+        if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
@@ -337,7 +401,7 @@ static esp_err_t logs_handler(httpd_req_t *req)
 
 static esp_err_t events_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     if (sse_add_client(req) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Too many SSE clients");
@@ -350,10 +414,15 @@ static esp_err_t events_handler(httpd_req_t *req)
     httpd_resp_sendstr(req, "event: connected\ndata: {}\n\n");
 
     /* Block this task to keep the SSE connection alive.
-     * When the client disconnects, httpd will close the socket,
-     * and we detect this by trying a recv. */
+     * recv(MSG_PEEK|MSG_DONTWAIT) returns:
+     *   > 0  → data available, client still connected
+     *   = 0  → EOF, client disconnected cleanly
+     *   < 0  → error; EAGAIN/EWOULDBLOCK means no data yet (client still connected) */
     char buf[1];
-    while (recv(httpd_req_to_sockfd(req), buf, 1, MSG_PEEK | MSG_DONTWAIT) >= 0 || errno == EAGAIN || errno == EWOULDBLOCK) {
+    for (;;) {
+        int ret = recv(httpd_req_to_sockfd(req), buf, 1, MSG_PEEK | MSG_DONTWAIT);
+        if (ret == 0) break;
+        if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
@@ -365,7 +434,7 @@ static esp_err_t events_handler(httpd_req_t *req)
 
 static esp_err_t scan_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     ble_central_start_scan();
 
@@ -383,11 +452,12 @@ static esp_err_t scan_handler(httpd_req_t *req)
 
 static esp_err_t scan_get_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
-    const char *results = ble_central_get_scan_results_json();
+    char results[2048];
+    ble_central_get_scan_results_json(results, sizeof(results));
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, results ? results : "[]");
+    httpd_resp_sendstr(req, results);
     return ESP_OK;
 }
 
@@ -395,7 +465,7 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
 
 static esp_err_t pairings_post_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -441,8 +511,18 @@ static esp_err_t pairings_post_handler(httpd_req_t *req)
 
         if (strcmp(role_item->valuestring, "keyboard") == 0) {
             ble_central_connect_keyboard(addr, (uint8_t)atype_item->valueint);
+            /* Save MAC to config so it auto-reconnects on reboot */
+            kvm_config_t *cfg = config_get_mutable();
+            memcpy(cfg->keyboard.mac, addr, 6);
+            cfg->keyboard.addr_type = (uint8_t)atype_item->valueint;
+            config_save_input_devices();
         } else if (strcmp(role_item->valuestring, "mouse") == 0) {
             ble_central_connect_mouse(addr, (uint8_t)atype_item->valueint);
+            /* Save MAC to config so it auto-reconnects on reboot */
+            kvm_config_t *cfg = config_get_mutable();
+            memcpy(cfg->mouse.mac, addr, 6);
+            cfg->mouse.addr_type = (uint8_t)atype_item->valueint;
+            config_save_input_devices();
         } else {
             cJSON_Delete(body);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid role");
@@ -470,19 +550,38 @@ static esp_err_t pairings_post_handler(httpd_req_t *req)
 
 static esp_err_t pairings_delete_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     const char *uri = req->uri;
     const char *prefix = "/api/pairings/";
     const char *id_start = uri + strlen(prefix);
-    if (id_start <= uri) {
+    if (id_start <= uri || *id_start == '\0') {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
         return ESP_FAIL;
     }
 
+    int pair_id = atoi(id_start);
+    kvm_config_t *cfg = config_get_mutable();
+    bool deleted = false;
+
+    if (pair_id >= 1 && pair_id <= MAX_PC_COUNT) {
+        int idx = pair_id - 1;
+        if (cfg->pcs[idx].pc_id == (uint8_t)pair_id) {
+            /* Clear the PC pairing: clear MAC, but keep pc_id for the slot */
+            memset(cfg->pcs[idx].identity_addr, 0, 6);
+            cfg->pcs[idx].addr_type = 0;
+            cfg->pcs[idx].name[0] = '\0';
+            cfg->pcs[idx].conn_handle = 0;
+            cfg->pcs[idx].connected = false;
+            config_save_pcs();
+            deleted = true;
+            ESP_LOGI(TAG, "Deleted pairing for PC%d", pair_id);
+        }
+    }
+
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "ok", true);
-    cJSON_AddStringToObject(root, "deleted", id_start);
+    cJSON_AddBoolToObject(root, "ok", deleted);
+    cJSON_AddNumberToObject(root, "id", pair_id);
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
@@ -495,7 +594,7 @@ static esp_err_t pairings_delete_handler(httpd_req_t *req)
 
 static esp_err_t devices_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     const kvm_config_t *cfg = config_get();
     cJSON *root = cJSON_CreateObject();
@@ -532,7 +631,7 @@ static esp_err_t devices_handler(httpd_req_t *req)
 
 static esp_err_t wifi_get_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     const kvm_config_t *cfg = config_get();
     cJSON *root = cJSON_CreateObject();
@@ -566,7 +665,7 @@ static esp_err_t wifi_get_handler(httpd_req_t *req)
 
 static esp_err_t wifi_patch_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -623,7 +722,7 @@ static esp_err_t wifi_patch_handler(httpd_req_t *req)
 
 static esp_err_t settings_get_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
 
     const kvm_config_t *cfg = config_get();
     cJSON *root = cJSON_CreateObject();
@@ -672,7 +771,11 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
 
 static esp_err_t settings_patch_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_FAIL;
+    if (!check_auth(req)) return ESP_OK;
+
+#if HAS_BATTERY
+    pm_sleep_on_activity();
+#endif
 
     char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
@@ -816,6 +919,23 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
         config_save_voice();
     }
 
+    cJSON *factory_reset = cJSON_GetObjectItem(body, "factory_reset");
+    if (cJSON_IsTrue(factory_reset)) {
+        cJSON_Delete(body);
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", true);
+        cJSON_AddStringToObject(root, "message", "Factory reset initiated");
+        char *json = cJSON_PrintUnformatted(root);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, json);
+        cJSON_free(json);
+        cJSON_Delete(root);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        nvs_flash_erase();
+        esp_restart();
+        return ESP_OK;
+    }
+
     cJSON_Delete(body);
 
     cJSON *root = cJSON_CreateObject();
@@ -858,18 +978,25 @@ void web_server_notify_device(const char *device_type, bool connected)
 
 static const httpd_uri_t uris[] = {
     { .uri = "/",               .method = HTTP_GET,    .handler = root_handler },
+    { .uri = "/api/auth-check", .method = HTTP_GET,    .handler = auth_check_handler },
     { .uri = "/api/status",     .method = HTTP_GET,    .handler = status_handler },
     { .uri = "/api/switch",     .method = HTTP_POST,   .handler = switch_handler },
     { .uri = "/api/events",     .method = HTTP_GET,    .handler = events_handler },
     { .uri = "/api/pairings",   .method = HTTP_POST,   .handler = pairings_post_handler },
     { .uri = "/api/pairings/*", .method = HTTP_DELETE, .handler = pairings_delete_handler },
+    { .uri = "/api/pair/pc",    .method = HTTP_POST,   .handler = pairings_post_handler },
+    { .uri = "/api/pair/keyboard", .method = HTTP_POST, .handler = pairings_post_handler },
+    { .uri = "/api/pair/mouse", .method = HTTP_POST,   .handler = pairings_post_handler },
     { .uri = "/api/scan",       .method = HTTP_POST,   .handler = scan_handler },
     { .uri = "/api/scan",       .method = HTTP_GET,    .handler = scan_get_handler },
+    { .uri = "/api/scan/results", .method = HTTP_GET,  .handler = scan_get_handler },
     { .uri = "/api/devices",    .method = HTTP_GET,    .handler = devices_handler },
     { .uri = "/api/wifi",       .method = HTTP_GET,    .handler = wifi_get_handler },
     { .uri = "/api/wifi",       .method = HTTP_PATCH,  .handler = wifi_patch_handler },
+    { .uri = "/api/wifi",       .method = HTTP_POST,   .handler = wifi_patch_handler },
     { .uri = "/api/settings",   .method = HTTP_GET,    .handler = settings_get_handler },
     { .uri = "/api/settings",   .method = HTTP_PATCH,  .handler = settings_patch_handler },
+    { .uri = "/api/settings",   .method = HTTP_POST,   .handler = settings_patch_handler },
     { .uri = "/api/logs",       .method = HTTP_GET,    .handler = logs_handler },
 };
 
@@ -886,8 +1013,11 @@ void web_server_init(void)
     memset(log_clients, 0, sizeof(log_clients));
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = NUM_URIS + 4;  /* a little headroom */
+    config.max_uri_handlers = NUM_URIS + 4;
     config.stack_size = 8192;
+    config.lru_purge_enable = true;
+    config.recv_wait_timeout = 10;
+    config.send_wait_timeout = 10;
 
     if (httpd_start(&server, &config) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start web server");

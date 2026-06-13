@@ -20,6 +20,7 @@ void imu_driver_init(i2c_master_bus_handle_t i2c_bus)
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = IMU_I2C_ADDR,
+        .scl_speed_hz = 100000,
     };
     esp_err_t err = i2c_master_bus_add_device(i2c_bus, &dev_cfg, &imu_dev);
     if (err != ESP_OK) {
@@ -42,6 +43,10 @@ void imu_driver_read_cursor(uint8_t sensitivity, imu_cursor_t *out)
 {
     out->x = 0;
     out->y = 0;
+#if HAS_BATTERY
+    extern void pm_sleep_on_imu_motion(void);
+    pm_sleep_on_imu_motion();
+#endif
     if (!imu_dev) return;
 
     uint8_t reg = REG_ACCEL_XOUT_H;

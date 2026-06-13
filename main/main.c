@@ -12,7 +12,13 @@
 #include "hid_router.h"
 #include "anti_idle.h"
 #include "board.h"
+#if HAS_BATTERY || HAS_INPUT_MODES || HAS_VOICE_INPUT
+#include "driver/i2c_master.h"
+#endif
+#if HAS_INPUT_MODES
 #include "input_mode.h"
+#include "imu_driver.h"
+#endif
 #if HAS_USB
 #include "usb_device.h"
 #include "usb_host.h"
@@ -63,14 +69,31 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     config_manager_init();
+    web_log_init();
+
+    /* Step 1: Init TFT first (creates I2C bus for PMIC) */
+    indicator_init();
+
+    /* Step 2: Init I2C peripherals using the shared bus */
+#if HAS_BATTERY || HAS_INPUT_MODES || HAS_VOICE_INPUT
+    extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
+    i2c_master_bus_handle_t i2c_bus = tft_display_get_i2c_bus();
+#endif
+
+#if HAS_BATTERY
+    power_manager_init(i2c_bus);
+    pm_sleep_init();
+#endif
+
+#if HAS_INPUT_MODES
+    imu_driver_init(i2c_bus);
+    input_mode_init();
+#endif
 
     const kvm_config_t *cfg = config_get();
-    web_log_init();
 
 #if HAS_VOICE_INPUT
     if (cfg->voice_asr_enabled && cfg->voice_asr_appid != 0) {
-        extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
-        i2c_master_bus_handle_t i2c_bus = tft_display_get_i2c_bus();
         es8311_init(i2c_bus);
         mic_driver_init();
         voice_input_init();
@@ -78,6 +101,10 @@ void app_main(void)
     }
 #endif
 
+    /* Step 3: WiFi */
+    wifi_manager_init();
+
+    /* Step 4: USB */
 #if HAS_USB
     if (cfg->usb_mode == USB_MODE_DEVICE) {
         usb_device_init();
@@ -90,32 +117,28 @@ void app_main(void)
     }
 #endif
 
-    wifi_manager_init();
-    indicator_init();
-
+    /* Step 5: BLE */
     ESP_ERROR_CHECK(nimble_port_init());
     ble_hs_cfg.sync_cb = ble_on_sync;
-
     ble_peripheral_init();
-
-    /* Skip BLE central when USB Host replaces it for input */
     if (cfg->usb_mode != USB_MODE_HOST) {
         ble_central_init();
     }
 
+    /* Start NimBLE host task BEFORE switch_manager_init() so the
+     * auto-connect timer (2s, created in ble_central_init) doesn't
+     * fire before the NimBLE event loop is active. */
+    nimble_port_freertos_init(ble_host_task);
+
+    /* Step 6: Input & routing */
     switch_manager_init();
     hid_router_init();
     hid_router_register_activity_cb(anti_idle_on_activity);
     anti_idle_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
+
+    /* Step 7: Web server */
     web_server_init();
-#if HAS_BATTERY
-    power_manager_init();
-#endif
-#if HAS_INPUT_MODES
-    input_mode_init();
-#endif
-    nimble_port_freertos_init(ble_host_task);
 
     ESP_LOGI(TAG, "BLE-KVM initialized, token: %s, usb_mode: %d",
              config_get()->auth_token, cfg->usb_mode);

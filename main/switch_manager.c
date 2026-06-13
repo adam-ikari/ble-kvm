@@ -4,6 +4,10 @@
 #include "board.h"
 #include "config_manager.h"
 #include "input_mode.h"
+#include "web_server.h"
+#if HAS_BATTERY
+#include "power_manager.h"
+#endif
 #if HAS_USB
 #include "usb_device.h"
 #endif
@@ -29,6 +33,7 @@ static const char *TAG = "switch";
 #define CMD_VOICE_STOP     6
 #define CMD_FACTORY_WARN   7
 #define CMD_FACTORY_CANCEL 8
+#define CMD_WEB_AUTH       9
 
 #define VOICE_PRESS_MS     500
 #define MODE_CYCLE_MS      5000
@@ -46,24 +51,27 @@ static bool is_pc3_connected(void)
 
 static QueueHandle_t switch_queue;
 static TaskHandle_t switch_task_handle;
-static int64_t button_press_time = 0;
-static bool button_pending = false;
-static bool long_press_triggered = false;
+static portMUX_TYPE switch_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static volatile int64_t button_press_time = 0;
+static volatile bool button_pending = false;
+static volatile bool long_press_triggered = false;
 
 static esp_timer_handle_t voice_start_timer;
+static esp_timer_handle_t dc_timeout_timer;  /* double-click window timeout */
 
 #if HAS_SECONDARY_BUTTON
-static int64_t sec_press_time = 0;
-static bool sec_pending = false;
-static bool sec_factory_warned = false;
+static volatile int64_t sec_press_time = 0;
+static volatile bool sec_pending = false;
+static volatile bool sec_factory_warned = false;
 static esp_timer_handle_t factory_warn_timer;
 #endif
 
 static void update_led_state(void)
 {
     const kvm_config_t *cfg = config_get();
-    bool pc1 = ble_peripheral_is_pc_connected(1);
-    bool pc2 = ble_peripheral_is_pc_connected(2);
+    /* ble_peripheral uses 0-indexed slots (0=PC1, 1=PC2) */
+    bool pc1 = ble_peripheral_is_pc_connected(0);
+    bool pc2 = ble_peripheral_is_pc_connected(1);
     bool pc3 = is_pc3_connected();
 
     if (!pc1 && !pc2 && !pc3) {
@@ -97,6 +105,9 @@ static void switch_task_func(void *arg)
     uint8_t cmd;
     while (1) {
         if (xQueueReceive(switch_queue, &cmd, pdMS_TO_TICKS(100))) {
+#if HAS_BATTERY
+            pm_sleep_on_activity();
+#endif
             if (cmd == CMD_SWITCH) {
                 if (input_mode_get() != INPUT_MODE_KVM) {
                     input_mode_on_primary_button();
@@ -111,7 +122,8 @@ static void switch_task_func(void *arg)
                         if (new_pc == 3) {
                             if (is_pc3_connected()) break;
                         } else {
-                            if (ble_peripheral_is_pc_connected(new_pc)) break;
+                            /* ble_peripheral uses 0-indexed slots */
+                            if (ble_peripheral_is_pc_connected(new_pc - 1)) break;
                         }
                     }
                     if (new_pc == old_pc) {
@@ -128,6 +140,7 @@ static void switch_task_func(void *arg)
 
                     ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
                     update_led_state();
+                    web_server_notify_switch(new_pc);
                 }
             }
 #if HAS_SECONDARY_BUTTON
@@ -170,6 +183,11 @@ static void switch_task_func(void *arg)
                 ESP_LOGI(TAG, "Factory reset cancelled");
                 update_led_state();
             }
+            else if (cmd == CMD_WEB_AUTH) {
+                extern void web_server_grant_auth(void);
+                web_server_grant_auth();
+                ESP_LOGI(TAG, "Web auth granted via double-click");
+            }
         } else {
             update_led_state();
         }
@@ -178,17 +196,35 @@ static void switch_task_func(void *arg)
 
 static void voice_start_timer_cb(void *arg)
 {
+    /* This runs in timer task context — safe to call esp_timer_stop.
+     * The ISR only sets button_pending/press_time; we check elapsed time here. */
+    portENTER_CRITICAL(&switch_spinlock);
     if (!button_pending) {
-        esp_timer_stop(voice_start_timer);
+        portEXIT_CRITICAL(&switch_spinlock);
         return;
     }
     int64_t now = esp_timer_get_time() / 1000;
     int64_t duration = now - button_press_time;
     if (duration >= VOICE_PRESS_MS && !long_press_triggered) {
         long_press_triggered = true;
+        portEXIT_CRITICAL(&switch_spinlock);
         uint8_t cmd = CMD_VOICE_START;
-        xQueueSendFromISR(switch_queue, &cmd, NULL);
-        esp_timer_stop(voice_start_timer);
+        xQueueSend(switch_queue, &cmd, 0);
+    } else {
+        portEXIT_CRITICAL(&switch_spinlock);
+    }
+}
+
+static volatile int64_t dc_last_release_time = 0;
+static volatile bool dc_waiting_second = false;
+
+/* One-shot timer: fires after double-click window expires, dispatches CMD_SWITCH */
+static void dc_timeout_timer_cb(void *arg)
+{
+    if (dc_waiting_second) {
+        dc_waiting_second = false;
+        uint8_t cmd = CMD_SWITCH;
+        xQueueSend(switch_queue, &cmd, 0);
     }
 }
 
@@ -196,48 +232,72 @@ static void IRAM_ATTR button_isr_handler(void *arg)
 {
     int64_t now = esp_timer_get_time() / 1000;
     int level = gpio_get_level(BUTTON_SWITCH_GPIO);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     if (level == 0 && !button_pending) {
         button_press_time = now;
         button_pending = true;
         long_press_triggered = false;
-        esp_timer_start_periodic(voice_start_timer, 50000);  /* 50ms */
+        /* Timer runs continuously; callback checks button_pending */
     } else if (level == 1 && button_pending) {
         button_pending = false;
-        esp_timer_stop(voice_start_timer);
 
         if (long_press_triggered) {
             uint8_t cmd = CMD_VOICE_STOP;
-            xQueueSendFromISR(switch_queue, &cmd, NULL);
+            xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
         } else {
             int64_t duration = now - button_press_time;
             if (duration > 50) {
-                uint8_t cmd = CMD_SWITCH;
-                xQueueSendFromISR(switch_queue, &cmd, NULL);
+                int64_t since_last = now - dc_last_release_time;
+                dc_last_release_time = now;
+
+                if (dc_waiting_second && since_last < 500) {
+                    /* Double-click: web auth — cancel the pending switch */
+                    dc_waiting_second = false;
+                    esp_timer_stop(dc_timeout_timer);
+                    uint8_t cmd = CMD_WEB_AUTH;
+                    xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+                } else {
+                    /* First click: arm double-click window.
+                     * CMD_SWITCH is deferred — only dispatched after
+                     * 500ms if no second click arrives. */
+                    dc_waiting_second = true;
+                    esp_timer_start_once(dc_timeout_timer, 500000);  /* 500ms */
+                }
             }
         }
+    }
+
+    if (xHigherPriorityTaskWoken == pdTRUE) {
+        portYIELD_FROM_ISR();
     }
 }
 
 #if HAS_SECONDARY_BUTTON
 static void factory_warn_timer_cb(void *arg)
 {
+    /* This runs in timer task context — safe to call esp_timer_stop.
+     * The ISR only sets sec_pending/sec_press_time; we check elapsed time here. */
+    portENTER_CRITICAL(&switch_spinlock);
     if (!sec_pending) {
-        esp_timer_stop(factory_warn_timer);
+        portEXIT_CRITICAL(&switch_spinlock);
         return;
     }
     int64_t now = esp_timer_get_time() / 1000;
     int64_t duration = now - sec_press_time;
 
     if (duration >= FACTORY_RST_MS) {
-        uint8_t cmd = CMD_FACTORY_RST;
-        xQueueSendFromISR(switch_queue, &cmd, NULL);
         sec_pending = false;
-        esp_timer_stop(factory_warn_timer);
+        portEXIT_CRITICAL(&switch_spinlock);
+        uint8_t cmd = CMD_FACTORY_RST;
+        xQueueSend(switch_queue, &cmd, 0);
     } else if (duration >= FACTORY_WARN_MS && !sec_factory_warned) {
         sec_factory_warned = true;
+        portEXIT_CRITICAL(&switch_spinlock);
         uint8_t cmd = CMD_FACTORY_WARN;
-        xQueueSendFromISR(switch_queue, &cmd, NULL);
+        xQueueSend(switch_queue, &cmd, 0);
+    } else {
+        portEXIT_CRITICAL(&switch_spinlock);
     }
 }
 
@@ -245,27 +305,31 @@ static void IRAM_ATTR secondary_button_isr_handler(void *arg)
 {
     int64_t now = esp_timer_get_time() / 1000;
     int level = gpio_get_level(BUTTON_SECONDARY_GPIO);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     if (level == 0 && !sec_pending) {
         sec_press_time = now;
         sec_pending = true;
         sec_factory_warned = false;
-        esp_timer_start_periodic(factory_warn_timer, 200000);  /* 200ms */
+        /* Timer runs continuously; callback checks sec_pending */
     } else if (level == 1 && sec_pending) {
         int64_t duration = now - sec_press_time;
         sec_pending = false;
-        esp_timer_stop(factory_warn_timer);
 
         if (sec_factory_warned) {
             uint8_t cmd = CMD_FACTORY_CANCEL;
-            xQueueSendFromISR(switch_queue, &cmd, NULL);
+            xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
         } else if (duration > 50 && duration < 1000) {
             uint8_t cmd = CMD_SECONDARY;
-            xQueueSendFromISR(switch_queue, &cmd, NULL);
+            xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
         } else if (duration >= 1000 && duration < MODE_CYCLE_MS) {
             uint8_t cmd = CMD_MODE_CYCLE;
-            xQueueSendFromISR(switch_queue, &cmd, NULL);
+            xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
         }
+    }
+
+    if (xHigherPriorityTaskWoken == pdTRUE) {
+        portYIELD_FROM_ISR();
     }
 }
 #endif
@@ -273,7 +337,7 @@ static void IRAM_ATTR secondary_button_isr_handler(void *arg)
 void switch_manager_init(void)
 {
     switch_queue = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreate(switch_task_func, "switch_mgr", 2048, NULL, 3, &switch_task_handle);
+    xTaskCreate(switch_task_func, "switch_mgr", 4096, NULL, 3, &switch_task_handle);
 
     vTaskDelay(pdMS_TO_TICKS(2000));
 
@@ -305,6 +369,8 @@ void switch_manager_init(void)
         .callback = voice_start_timer_cb,
     };
     esp_timer_create(&voice_timer_args, &voice_start_timer);
+    /* Timer runs continuously — ISR sets button_pending, callback checks it */
+    esp_timer_start_periodic(voice_start_timer, 50000);  /* 50ms */
 
 #if HAS_SECONDARY_BUTTON
     const esp_timer_create_args_t factory_timer_args = {
@@ -312,7 +378,15 @@ void switch_manager_init(void)
         .callback = factory_warn_timer_cb,
     };
     esp_timer_create(&factory_timer_args, &factory_warn_timer);
+    /* Timer runs continuously — ISR sets sec_pending, callback checks it */
+    esp_timer_start_periodic(factory_warn_timer, 200000);  /* 200ms */
 #endif
+
+    const esp_timer_create_args_t dc_timer_args = {
+        .name = "dc_timeout",
+        .callback = dc_timeout_timer_cb,
+    };
+    esp_timer_create(&dc_timer_args, &dc_timeout_timer);
 
     ESP_LOGI(TAG, "Switch manager initialized");
 }
@@ -334,18 +408,23 @@ uint16_t switch_manager_get_active_conn_handle(void)
     if (cfg->active_pc == 3 && cfg->usb_mode == USB_MODE_DEVICE) {
         return 0xFFFF;
     }
-    return ble_peripheral_get_conn_handle(cfg->active_pc);
+    return ble_peripheral_get_conn_handle(cfg->active_pc - 1);  /* 0-indexed */
 }
 
 void switch_manager_on_pc_connected(uint8_t pc_id, uint16_t conn_handle)
 {
     ESP_LOGI(TAG, "PC%d connected (handle=%d)", pc_id, conn_handle);
     update_led_state();
+    web_server_notify_connection(pc_id, true);
+#if HAS_BATTERY
+    pm_sleep_on_pc_connected(pc_id);
+#endif
 }
 
 void switch_manager_on_pc_disconnected(uint8_t pc_id)
 {
     ESP_LOGI(TAG, "PC%d disconnected", pc_id);
+    web_server_notify_connection(pc_id, false);
     kvm_config_t *cfg = config_get_mutable();
     if (cfg->active_pc == pc_id) {
         for (uint8_t candidate = 1; candidate <= 3; candidate++) {
@@ -357,7 +436,7 @@ void switch_manager_on_pc_disconnected(uint8_t pc_id)
                     break;
                 }
             } else {
-                if (ble_peripheral_is_pc_connected(candidate)) {
+                if (ble_peripheral_is_pc_connected(candidate - 1)) {  /* 0-indexed */
                     cfg->active_pc = candidate;
                     config_save_active_pc();
                     break;
@@ -366,4 +445,7 @@ void switch_manager_on_pc_disconnected(uint8_t pc_id)
         }
     }
     update_led_state();
+#if HAS_BATTERY
+    pm_sleep_on_pc_disconnected(pc_id);
+#endif
 }
