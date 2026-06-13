@@ -8,6 +8,7 @@ typedef enum {
     IND_PAIRING,
     IND_VOICE_RECORDING,
     IND_FACTORY_WARN,
+    IND_SLEEP,            /* device in low-power sleep, LED breathing */
 } indicator_state_t;
 
 void indicator_init(void);

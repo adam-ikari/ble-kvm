@@ -53,6 +53,15 @@ static void led_task(void *arg)
             toggle = !toggle;
             vTaskDelay(pdMS_TO_TICKS(200));
             break;
+        case IND_SLEEP: {
+            /* Breathing via slow blink. GPIO LEDs don't support PWM,
+             * so use a 2-second blink cycle. */
+            static int breath_counter = 0;
+            set_leds((breath_counter < 50), (breath_counter < 50));
+            vTaskDelay(pdMS_TO_TICKS(20));
+            breath_counter = (breath_counter + 1) % 100;
+            break;
+        }
         }
     }
 }

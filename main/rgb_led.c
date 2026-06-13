@@ -2,6 +2,7 @@
 #include "board.h"
 #if HAS_RGB_LED
 
+#include "config_manager.h"
 #include "driver/rmt_tx.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -79,6 +80,24 @@ static void rgb_task(void *arg)
             toggle = !toggle;
             vTaskDelay(pdMS_TO_TICKS(200));
             break;
+        case IND_SLEEP: {
+            /* Breathing: slow fade in/out. 2-second cycle: 1s up, 1s down */
+            static int breath_step = 0;
+            static int breath_dir = 1;
+            int brightness = breath_step * 255 / 50;  /* 50 steps */
+            /* Show current owner color at breathing brightness */
+            const kvm_config_t *cfg = config_get();
+            uint8_t r = 0, g = 0, b = 0;
+            if (cfg->active_pc == 1)      { g = brightness; }
+            else if (cfg->active_pc == 2) { b = brightness; }
+            else if (cfg->active_pc == 3) { r = brightness / 2; b = brightness; }
+            send_rgb(r, g, b);
+            breath_step += breath_dir;
+            if (breath_step >= 50) breath_dir = -1;
+            if (breath_step <= 0)  breath_dir = 1;
+            vTaskDelay(pdMS_TO_TICKS(20));  /* 20ms * 50 = 1000ms per half-cycle */
+            break;
+        }
         }
     }
 }
@@ -95,7 +114,7 @@ void rgb_led_init(void)
     ESP_ERROR_CHECK(rmt_new_tx_channel(&chan_cfg, &tx_chan));
     ESP_ERROR_CHECK(rmt_enable(tx_chan));
 
-    rmt_bytes_encoder_config_t enc_cfg = {};
+    rmt_bytes_encoder_config_t enc_cfg = {0};
     ESP_ERROR_CHECK(rmt_new_bytes_encoder(&enc_cfg, &encoder));
 
     xTaskCreate(rgb_task, "rgb_led", 2048, NULL, 1, &rgb_task_handle);
