@@ -38,7 +38,7 @@ static const char *TAG = "switch";
 #define VOICE_PRESS_MS     500
 #define MODE_CYCLE_MS      5000
 #define FACTORY_WARN_MS    5000
-#define FACTORY_RST_MS     10000
+#define FACTORY_RST_MS     5000
 
 static bool is_pc3_connected(void)
 {
@@ -205,6 +205,9 @@ static void voice_start_timer_cb(void *arg)
     }
     int64_t now = esp_timer_get_time() / 1000;
     int64_t duration = now - button_press_time;
+
+#if HAS_SECONDARY_BUTTON
+    /* StickS3: long press = voice start */
     if (duration >= VOICE_PRESS_MS && !long_press_triggered) {
         long_press_triggered = true;
         portEXIT_CRITICAL(&switch_spinlock);
@@ -213,6 +216,17 @@ static void voice_start_timer_cb(void *arg)
     } else {
         portEXIT_CRITICAL(&switch_spinlock);
     }
+#else
+    /* Single-button: long press = factory reset */
+    if (duration >= FACTORY_RST_MS && !long_press_triggered) {
+        long_press_triggered = true;
+        portEXIT_CRITICAL(&switch_spinlock);
+        uint8_t cmd = CMD_FACTORY_RST;
+        xQueueSend(switch_queue, &cmd, 0);
+    } else {
+        portEXIT_CRITICAL(&switch_spinlock);
+    }
+#endif
 }
 
 static volatile int64_t dc_last_release_time = 0;
@@ -243,8 +257,13 @@ static void IRAM_ATTR button_isr_handler(void *arg)
         button_pending = false;
 
         if (long_press_triggered) {
+#if HAS_SECONDARY_BUTTON
             uint8_t cmd = CMD_VOICE_STOP;
             xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+#else
+            /* Single-button: factory reset already queued in timer callback.
+             * Nothing to do on release — the reset will execute. */
+#endif
         } else {
             int64_t duration = now - button_press_time;
             if (duration > 50) {
