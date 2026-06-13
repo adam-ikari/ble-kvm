@@ -49,6 +49,7 @@ typedef struct {
     char voice_asr_api_key[65];       /* Baidu API Key (appkey) */
     char voice_lang[8];               /* "zh" or "en", default: "zh" */
     uint8_t voice_input_mode;         /* 0=auto, 1=pinyin, 2=ascii */
+    char device_name[DEVICE_NAME_MAX];  /* BLE broadcast name, default KVM-<MAC> */
 } kvm_config_t;
 
 void config_manager_init(void);
@@ -65,4 +66,5 @@ void config_save_input_mode(void);
 void config_save_usb_mode(void);
 void config_save_voice(void);
 void config_save_sleep(void);
+void config_save_device_name(void);
 void config_manager_deinit(void);

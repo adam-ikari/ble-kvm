@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
@@ -290,10 +291,10 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
             if (slot >= 0) {
                 pc_conns[slot].conn_handle = event->connect.conn_handle;
                 pc_conns[slot].connected = true;
-                ESP_LOGI(TAG, "PC %d connected (handle=%d)", slot, event->connect.conn_handle);
+                ESP_LOGI(TAG, "PC %d connected (handle=%d)", slot + 1, event->connect.conn_handle);
 
                 if (conn_cb) {
-                    conn_cb(slot, event->connect.conn_handle, true);
+                    conn_cb(slot + 1, event->connect.conn_handle, true);
                 }
 
                 /* Restart advertising if not all PCs connected */
@@ -315,12 +316,12 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
         {
             int slot = find_pc_slot_by_handle(event->disconnect.conn.conn_handle);
             if (slot >= 0) {
-                ESP_LOGI(TAG, "PC %d disconnected", slot);
+                ESP_LOGI(TAG, "PC %d disconnected", slot + 1);
                 pc_conns[slot].connected = false;
                 pc_conns[slot].conn_handle = 0;
 
                 if (conn_cb) {
-                    conn_cb(slot, 0, false);
+                    conn_cb(slot + 1, 0, false);
                 }
             }
         }
@@ -436,7 +437,10 @@ void ble_peripheral_stop_advertising(void)
 uint16_t ble_peripheral_get_conn_handle(uint8_t pc_id)
 {
     if (pc_id >= MAX_PC_CONNECTIONS) {
-        return 0;
+        return BLE_HS_CONN_HANDLE_NONE;
+    }
+    if (!pc_conns[pc_id].connected) {
+        return BLE_HS_CONN_HANDLE_NONE;
     }
     return pc_conns[pc_id].conn_handle;
 }
@@ -476,8 +480,13 @@ int ble_peripheral_send_hid_report(uint16_t conn_handle, uint8_t report_id,
         return BLE_HS_EINVAL;
     }
 
-    /* Build the report data: report_id byte + data */
-    uint8_t report_data[1 + len];
+    /* Build the report data: report_id byte + data.
+     * Use a fixed-size buffer (max HID report is 64 bytes + 1 report_id). */
+    uint8_t report_data[65];
+    if (len > 64) {
+        ESP_LOGE(TAG, "Report data too long: %d bytes", len);
+        return BLE_HS_EINVAL;
+    }
     report_data[0] = report_id;
     memcpy(&report_data[1], data, len);
 
@@ -515,7 +524,17 @@ void ble_peripheral_init(void)
     int rc;
 
     /* Set device name */
-    ble_svc_gap_device_name_set("BLE-KVM");
+    uint8_t mac[6];
+    char default_name[16];
+    esp_read_mac(mac, ESP_MAC_BT);
+    snprintf(default_name, sizeof(default_name), "KVM-%02X%02X", mac[4], mac[5]);
+
+    const kvm_config_t *cfg = config_get();
+    if (cfg->device_name[0] != '\0') {
+        ble_svc_gap_device_name_set(cfg->device_name);
+    } else {
+        ble_svc_gap_device_name_set(default_name);
+    }
 
     /* Configure host settings */
     ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
@@ -530,7 +549,7 @@ void ble_peripheral_init(void)
     ble_svc_bas_init();
 
     /* Configure Device Information Service */
-    ble_svc_dis_manufacturer_name_set("BLE-KVM");
+    ble_svc_dis_manufacturer_name_set(cfg->device_name[0] ? cfg->device_name : "BLE-KVM");
 
     /* Configure GATT server */
     rc = ble_gatts_count_cfg(gatt_svr_svcs);

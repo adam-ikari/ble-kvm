@@ -93,6 +93,8 @@ static void load_voice(void);
 
 static void load_sleep(void);
 
+static void load_device_name(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
@@ -110,6 +112,7 @@ void config_manager_init(void)
     load_usb_mode();
     load_voice();
     load_sleep();
+    load_device_name();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -267,6 +270,21 @@ void config_save_sleep(void)
 {
     ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "scr_off_to", config.screen_off_timeout_sec));
     ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "sleep_to", config.sleep_timeout_sec));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+static void load_device_name(void)
+{
+    size_t required_size = sizeof(config.device_name);
+    esp_err_t err = nvs_get_str(nvs_config, "dev_name", config.device_name, &required_size);
+    if (err != ESP_OK) {
+        config.device_name[0] = '\0';
+    }
+}
+
+void config_save_device_name(void)
+{
+    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "dev_name", config.device_name));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }
 
