@@ -34,11 +34,12 @@ static const char *TAG = "switch";
 #define CMD_FACTORY_WARN   7
 #define CMD_FACTORY_CANCEL 8
 #define CMD_WEB_AUTH       9
+#define CMD_PPT_PAGE_UP    10
 
 #define VOICE_PRESS_MS     500
 #define MODE_CYCLE_MS      5000
 #define FACTORY_WARN_MS    5000
-#define FACTORY_RST_MS     5000
+#define FACTORY_RST_MS     10000
 
 static bool is_pc3_connected(void)
 {
@@ -55,6 +56,7 @@ static portMUX_TYPE switch_spinlock = portMUX_INITIALIZER_UNLOCKED;
 static volatile int64_t button_press_time = 0;
 static volatile bool button_pending = false;
 static volatile bool long_press_triggered = false;
+static volatile bool factory_warned = false;
 
 static esp_timer_handle_t voice_start_timer;
 static esp_timer_handle_t dc_timeout_timer;  /* double-click window timeout */
@@ -188,6 +190,14 @@ static void switch_task_func(void *arg)
                 web_server_grant_auth();
                 ESP_LOGI(TAG, "Web auth granted via double-click");
             }
+            else if (cmd == CMD_PPT_PAGE_UP) {
+#if HAS_INPUT_MODES
+                uint16_t conn = switch_manager_get_active_conn_handle();
+                if (conn != 0xFFFF && conn != 0) {
+                    ble_peripheral_send_consumer_key(conn, 0x004B); /* Page Up */
+                }
+#endif
+            }
         } else {
             update_led_state();
         }
@@ -217,11 +227,16 @@ static void voice_start_timer_cb(void *arg)
         portEXIT_CRITICAL(&switch_spinlock);
     }
 #else
-    /* Single-button: long press = factory reset */
+    /* Single-button: factory reset at 10s, warning at 5s */
     if (duration >= FACTORY_RST_MS && !long_press_triggered) {
         long_press_triggered = true;
         portEXIT_CRITICAL(&switch_spinlock);
         uint8_t cmd = CMD_FACTORY_RST;
+        xQueueSend(switch_queue, &cmd, 0);
+    } else if (duration >= FACTORY_WARN_MS && !factory_warned) {
+        factory_warned = true;
+        portEXIT_CRITICAL(&switch_spinlock);
+        uint8_t cmd = CMD_FACTORY_WARN;
         xQueueSend(switch_queue, &cmd, 0);
     } else {
         portEXIT_CRITICAL(&switch_spinlock);
@@ -265,17 +280,33 @@ static void IRAM_ATTR button_isr_handler(void *arg)
              * Nothing to do on release — the reset will execute. */
 #endif
         } else {
+#if !HAS_SECONDARY_BUTTON
+            /* Single-button: if warned but released before reset, cancel */
+            if (factory_warned) {
+                factory_warned = false;
+                uint8_t cmd = CMD_FACTORY_CANCEL;
+                xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+            }
+#endif
             int64_t duration = now - button_press_time;
             if (duration > 50) {
                 int64_t since_last = now - dc_last_release_time;
                 dc_last_release_time = now;
 
                 if (dc_waiting_second && since_last < 500) {
-                    /* Double-click: web auth — cancel the pending switch */
+                    /* Double-click: web auth (KVM) or Page Up (PPT) */
                     dc_waiting_second = false;
                     esp_timer_stop(dc_timeout_timer);
-                    uint8_t cmd = CMD_WEB_AUTH;
-                    xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+#if HAS_INPUT_MODES
+                    if (input_mode_get() == INPUT_MODE_PPT_AIR) {
+                        uint8_t cmd = CMD_PPT_PAGE_UP;
+                        xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+                    } else
+#endif
+                    {
+                        uint8_t cmd = CMD_WEB_AUTH;
+                        xQueueSendFromISR(switch_queue, &cmd, &xHigherPriorityTaskWoken);
+                    }
                 } else {
                     /* First click: arm double-click window.
                      * CMD_SWITCH is deferred — only dispatched after
