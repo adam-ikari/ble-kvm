@@ -15,12 +15,14 @@
 static const char *TAG = "anti_idle";
 static esp_timer_handle_t idle_timer;
 static bool active = false;
+static portMUX_TYPE anti_idle_spinlock = portMUX_INITIALIZER_UNLOCKED;
+static int64_t pc_last_activity[3] = {0, 0, 0};  /* per-PC last activity timestamps (microseconds) */
 
-static void send_mouse_nudge(void)
+static void send_mouse_nudge_to_pc(uint8_t pc_id)
 {
     const kvm_config_t *cfg = config_get();
 
-    if (cfg->active_pc == 3 && cfg->usb_mode == USB_MODE_DEVICE) {
+    if (pc_id == 3 && cfg->usb_mode == USB_MODE_DEVICE) {
 #if HAS_USB
         if (!usb_device_is_connected()) return;
         uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
@@ -30,14 +32,28 @@ static void send_mouse_nudge(void)
         usb_device_send_mouse(report2, sizeof(report2));
 #endif
     } else {
-        uint16_t conn = switch_manager_get_active_conn_handle();
+        uint16_t conn = ble_peripheral_get_conn_handle(pc_id - 1);
         if (conn == 0 || conn == 0xFFFF) return;
-        if (!ble_central_is_mouse_connected()) return;
         uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
         ble_peripheral_send_hid_report(conn, 2, report1, sizeof(report1));
         vTaskDelay(pdMS_TO_TICKS(20));
         uint8_t report2[] = {0x00, 0xFF, 0x00, 0x00};
         ble_peripheral_send_hid_report(conn, 2, report2, sizeof(report2));
+    }
+}
+
+static void send_mouse_nudge(void)
+{
+    if (!config_get()->anti_idle_enabled) return;
+    int64_t now = esp_timer_get_time();
+    uint64_t interval_us = (uint64_t)config_get()->anti_idle_interval_sec * 1000000;
+
+    for (uint8_t pc = 1; pc <= 3; pc++) {
+        int64_t last = pc_last_activity[pc - 1];
+        if (last == 0) continue;  /* PC never had activity, skip */
+        if ((now - last) < (int64_t)interval_us) continue;  /* Recently active, skip */
+        send_mouse_nudge_to_pc(pc);
+        pc_last_activity[pc - 1] = now;  /* Reset after nudge */
     }
 }
 
@@ -61,6 +77,7 @@ static void restart_timer(void)
 #else
     has_input = ble_central_is_mouse_connected();
 #endif
+    portENTER_CRITICAL(&anti_idle_spinlock);
     if (cfg->anti_idle_enabled && has_input) {
         uint16_t interval = cfg->anti_idle_interval_sec;
         esp_timer_start_periodic(idle_timer, (uint64_t)interval * 1000000);
@@ -68,6 +85,7 @@ static void restart_timer(void)
     } else {
         active = false;
     }
+    portEXIT_CRITICAL(&anti_idle_spinlock);
 }
 
 void anti_idle_init(void)
@@ -87,7 +105,16 @@ void anti_idle_init(void)
 
 void anti_idle_on_activity(void)
 {
-    if (active) {
+    int64_t now = esp_timer_get_time();
+    bool is_active;
+    portENTER_CRITICAL(&anti_idle_spinlock);
+    is_active = active;
+    /* Mark all connected PCs as active */
+    for (int i = 0; i < 3; i++) {
+        pc_last_activity[i] = now;
+    }
+    portEXIT_CRITICAL(&anti_idle_spinlock);
+    if (is_active) {
         restart_timer();
     }
 }
