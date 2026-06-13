@@ -1,10 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { getToken } from '../api';
 
 interface SseCallbacks {
   onSwitch?: (activePc: number) => void;
   onConnection?: (data: Record<string, string>) => void;
   onDevice?: (data: Record<string, string>) => void;
+  onAuth?: (token: string) => void;
 }
 
 export function useSse(callbacks: SseCallbacks) {
@@ -13,9 +13,7 @@ export function useSse(callbacks: SseCallbacks) {
   callbacksRef.current = callbacks;
 
   const connect = useCallback(() => {
-    const token = getToken();
-    if (!token) return;
-    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    const es = new EventSource('/api/events');
     es.addEventListener('switch', (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       callbacksRef.current.onSwitch?.(data.active_pc);
@@ -27,6 +25,10 @@ export function useSse(callbacks: SseCallbacks) {
     es.addEventListener('device', (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       callbacksRef.current.onDevice?.(data);
+    });
+    es.addEventListener('auth', (e) => {
+      const data = JSON.parse((e as MessageEvent).data);
+      callbacksRef.current.onAuth?.(data.token);
     });
     es.onerror = () => {
       es.close();

@@ -27,8 +27,8 @@ export function PairPanel() {
           {results.map((d, i) => (
             <li key={i}>
               {d.name || 'Unknown'} ({d.addr})
-              <button onClick={() => d.has_keyboard && api.pairKeyboard(d.addr)}>Keyboard</button>
-              <button onClick={() => d.has_mouse && api.pairMouse(d.addr)}>Mouse</button>
+              <button onClick={() => d.has_keyboard && api.pairKeyboard(d.addr, d.addr_type)}>Keyboard</button>
+              <button onClick={() => d.has_mouse && api.pairMouse(d.addr, d.addr_type)}>Mouse</button>
             </li>
           ))}
         </ul>

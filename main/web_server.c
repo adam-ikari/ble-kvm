@@ -6,6 +6,7 @@
 #include "wifi_manager.h"
 #include "anti_idle.h"
 #include "input_mode.h"
+#include "services/gap/ble_svc_gap.h"
 #if HAS_USB
 #include "usb_device.h"
 #include "usb_host.h"
@@ -767,6 +768,7 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
         cJSON_AddStringToObject(pc_names, key, cfg->pcs[i].name[0] ? cfg->pcs[i].name : "");
     }
     cJSON_AddItemToObject(root, "pc_names", pc_names);
+    cJSON_AddStringToObject(root, "device_name", cfg->device_name[0] ? cfg->device_name : "");
     cJSON_AddBoolToObject(root, "wifi_enabled", cfg->wifi_enabled);
     cJSON_AddStringToObject(root, "wifi_ssid", cfg->wifi_ssid);
     cJSON_AddBoolToObject(root, "anti_idle", cfg->anti_idle_enabled);
@@ -839,6 +841,15 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
             }
         }
         config_save_pcs();
+    }
+
+    cJSON *dev_name = cJSON_GetObjectItem(body, "device_name");
+    if (cJSON_IsString(dev_name)) {
+        strncpy(cfg->device_name, dev_name->valuestring, DEVICE_NAME_MAX - 1);
+        cfg->device_name[DEVICE_NAME_MAX - 1] = '\0';
+        config_save_device_name();
+        /* Update BLE advertising name */
+        ble_svc_gap_device_name_set(cfg->device_name);
     }
 
     cJSON *regen = cJSON_GetObjectItem(body, "regenerate_token");
