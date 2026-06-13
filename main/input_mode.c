@@ -16,8 +16,8 @@ static input_mode_t current_mode = INPUT_MODE_KVM;
 static TaskHandle_t air_mouse_task = NULL;
 static esp_timer_handle_t consumer_release_timer = NULL;
 
-#define CONSUMER_KEY_NEXT  0x00B5
-#define CONSUMER_KEY_PREV  0x00B6
+#define CONSUMER_KEY_PAGE_DOWN  0x004E
+#define CONSUMER_KEY_PAGE_UP    0x004B
 
 static void consumer_key_release_cb(void *arg)
 {
@@ -116,14 +116,15 @@ void input_mode_cycle(void)
 void input_mode_on_primary_button(void)
 {
     if (current_mode == INPUT_MODE_PPT_AIR) {
-        send_consumer_key(CONSUMER_KEY_PREV);
+        send_consumer_key(CONSUMER_KEY_PAGE_DOWN);
     }
 }
 
 void input_mode_on_secondary_button(void)
 {
     if (current_mode == INPUT_MODE_PPT_AIR) {
-        send_consumer_key(CONSUMER_KEY_NEXT);
+        /* Side button in PPT mode: switch back to KVM */
+        input_mode_set(INPUT_MODE_KVM);
     }
 }
 
