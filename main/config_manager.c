@@ -91,6 +91,8 @@ static void load_usb_mode(void);
 
 static void load_voice(void);
 
+static void load_sleep(void);
+
 void config_manager_init(void)
 {
     ESP_ERROR_CHECK(nvs_open(NS_BLE, NVS_READWRITE, &nvs_ble));
@@ -107,6 +109,7 @@ void config_manager_init(void)
     load_input_mode();
     load_usb_mode();
     load_voice();
+    load_sleep();
 
     ESP_LOGI(TAG, "Config loaded: active_pc=%d, auth_token=%s", config.active_pc, config.auth_token);
 }
@@ -247,4 +250,30 @@ void config_save_voice(void)
     ESP_ERROR_CHECK(nvs_set_str(nvs_config, "voice_lang", config.voice_lang));
     ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "voice_im", config.voice_input_mode));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+static void load_sleep(void)
+{
+    uint16_t val = 0;
+    esp_err_t err = nvs_get_u16(nvs_config, "scr_off_to", &val);
+    config.screen_off_timeout_sec = (err == ESP_OK) ? val : 30;
+
+    val = 0;
+    err = nvs_get_u16(nvs_config, "sleep_to", &val);
+    config.sleep_timeout_sec = (err == ESP_OK) ? val : 60;
+}
+
+void config_save_sleep(void)
+{
+    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "scr_off_to", config.screen_off_timeout_sec));
+    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "sleep_to", config.sleep_timeout_sec));
+    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+}
+
+void config_manager_deinit(void)
+{
+    nvs_close(nvs_ble);
+    nvs_close(nvs_config);
+    nvs_close(nvs_wifi);
+    nvs_close(nvs_system);
 }

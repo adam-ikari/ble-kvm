@@ -40,6 +40,8 @@ typedef struct {
     bool wifi_enabled;
     bool anti_idle_enabled;
     uint16_t anti_idle_interval_sec;
+    uint16_t screen_off_timeout_sec;   /* seconds, 0 = never, default 30, battery only */
+    uint16_t sleep_timeout_sec;        /* seconds, 0 = never, default 60, battery only */
     uint8_t input_mode;            /* 0=KVM, 1=PPT/Air Mouse */
     uint8_t air_mouse_sensitivity; /* 1-10, default 5 */
     bool voice_asr_enabled;           /* default: false */
@@ -62,3 +64,5 @@ void config_save_anti_idle(void);
 void config_save_input_mode(void);
 void config_save_usb_mode(void);
 void config_save_voice(void);
+void config_save_sleep(void);
+void config_manager_deinit(void);
