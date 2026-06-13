@@ -1,5 +1,6 @@
 #include "ble_peripheral.h"
 #include "config_manager.h"
+#include "indicator.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -78,6 +79,52 @@ static pc_conn_t pc_conns[MAX_PC_CONNECTIONS] = {
     { .pc_id = 0, .conn_handle = 0, .connected = false },
     { .pc_id = 1, .conn_handle = 0, .connected = false },
 };
+
+static bool pairing_mode = false;
+static esp_timer_handle_t pairing_timer = NULL;
+
+static void pairing_timeout_cb(void *arg)
+{
+    ESP_LOGI(TAG, "Pairing mode timeout");
+    ble_peripheral_exit_pairing_mode();
+}
+
+void ble_peripheral_enter_pairing_mode(void)
+{
+    if (pairing_mode) return;
+    pairing_mode = true;
+    ESP_LOGI(TAG, "Pairing mode entered (60s timeout)");
+
+    /* Start advertising if not already */
+    ble_peripheral_start_advertising();
+
+    /* Set LED to pairing indicator */
+    indicator_set_state(IND_PAIRING);
+
+    /* Start 60s timeout */
+    if (pairing_timer == NULL) {
+        esp_timer_create_args_t args = {
+            .callback = pairing_timeout_cb,
+            .name = "pairing_to",
+        };
+        esp_timer_create(&args, &pairing_timer);
+    }
+    esp_timer_start_once(pairing_timer, 60000000); /* 60s */
+}
+
+void ble_peripheral_exit_pairing_mode(void)
+{
+    if (!pairing_mode) return;
+    pairing_mode = false;
+    ESP_LOGI(TAG, "Pairing mode exited");
+    esp_timer_stop(pairing_timer);
+    /* LED will be restored by switch_manager's update_led_state */
+}
+
+bool ble_peripheral_is_pairing_mode(void)
+{
+    return pairing_mode;
+}
 
 static ble_peripheral_conn_cb_t conn_cb = NULL;
 
@@ -286,6 +333,29 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
         ESP_LOGI(TAG, "BLE_GAP_EVENT_CONNECT; status=%d", event->connect.status);
 
         if (event->connect.status == 0) {
+            /* Check if we should accept this connection */
+            bool accept = pairing_mode;
+
+            /* Also accept if this device is already paired (bonded) */
+            if (!accept) {
+                const kvm_config_t *cfg = config_get();
+                for (int i = 0; i < MAX_PC_COUNT - 1; i++) {  /* PC1 and PC2 only */
+                    if (cfg->pcs[i].identity_addr[0] != 0 || cfg->pcs[i].identity_addr[1] != 0) {
+                        /* A saved PC exists — accept because bonding ensures only
+                         * the paired device can re-encrypt and connect successfully */
+                        accept = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!accept) {
+                ESP_LOGW(TAG, "Not in pairing mode, rejecting connection");
+                ble_gap_terminate(event->connect.conn_handle,
+                                  BLE_ERR_REM_USER_CONN_TERM);
+                break;
+            }
+
             /* Connection successful */
             int slot = find_free_pc_slot();
             if (slot >= 0) {
@@ -295,6 +365,11 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
 
                 if (conn_cb) {
                     conn_cb(slot + 1, event->connect.conn_handle, true);
+                }
+
+                /* Exit pairing mode after successful connection */
+                if (pairing_mode) {
+                    ble_peripheral_exit_pairing_mode();
                 }
 
                 /* Restart advertising if not all PCs connected */

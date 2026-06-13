@@ -44,19 +44,35 @@ static SemaphoreHandle_t sse_mutex = NULL;
 
 /* ── Auth ─────────────────────────────────────────────────────────── */
 
-static bool web_authorized = false;
-
-void web_server_grant_auth(void)
-{
-    web_authorized = true;
-    ESP_LOGI(TAG, "Web access granted");
-}
+static void sse_broadcast(const char *event, const char *data);
 
 static bool check_auth(httpd_req_t *req)
 {
-    if (web_authorized) return true;
+    char auth_header[128] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, sizeof(auth_header)) == ESP_OK) {
+        const kvm_config_t *cfg = config_get();
+        if (cfg->auth_token[0] != '\0') {
+            char expected[96];
+            snprintf(expected, sizeof(expected), "Bearer %s", cfg->auth_token);
+            if (strcmp(auth_header, expected) == 0) {
+                return true;
+            }
+        }
+    }
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"waiting\",\"message\":\"Double-click the device button to authorize\"}");
     return false;
+}
+
+void web_server_grant_auth(void)
+{
+    const kvm_config_t *cfg = config_get();
+    ESP_LOGI(TAG, "Web access granted, token: %s", cfg->auth_token);
+
+    /* Push token to all SSE clients */
+    char data[128];
+    snprintf(data, sizeof(data), "{\"token\":\"%s\"}", cfg->auth_token);
+    sse_broadcast("auth", data);
 }
 
 /* ── SSE helpers ──────────────────────────────────────────────────── */
@@ -165,11 +181,22 @@ static esp_err_t root_handler(httpd_req_t *req)
 static esp_err_t auth_check_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "application/json");
-    if (web_authorized) {
-        httpd_resp_sendstr(req, "{\"authorized\":true}");
-    } else {
-        httpd_resp_sendstr(req, "{\"authorized\":false,\"message\":\"Double-click the device button to authorize\"}");
+
+    /* Check Bearer token first */
+    char auth_header[128] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_header, sizeof(auth_header)) == ESP_OK) {
+        const kvm_config_t *cfg = config_get();
+        if (cfg->auth_token[0] != '\0') {
+            char expected[96];
+            snprintf(expected, sizeof(expected), "Bearer %s", cfg->auth_token);
+            if (strcmp(auth_header, expected) == 0) {
+                httpd_resp_sendstr(req, "{\"authorized\":true}");
+                return ESP_OK;
+            }
+        }
     }
+
+    httpd_resp_sendstr(req, "{\"authorized\":false,\"message\":\"Double-click the device button to authorize\"}");
     return ESP_OK;
 }
 
@@ -971,6 +998,43 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── Endpoint: POST /api/pairing/start ───────────────────────────── */
+
+static esp_err_t pairing_start_handler(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+
+    ble_peripheral_enter_pairing_mode();
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "message", "Pairing mode active for 60 seconds");
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ── Endpoint: POST /api/pairing/stop ────────────────────────────── */
+
+static esp_err_t pairing_stop_handler(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+
+    ble_peripheral_exit_pairing_mode();
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    char *json = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 /* ── Notification functions ───────────────────────────────────────── */
 
 void web_server_notify_switch(uint8_t active_pc)
@@ -1020,6 +1084,8 @@ static const httpd_uri_t uris[] = {
     { .uri = "/api/settings",   .method = HTTP_PATCH,  .handler = settings_patch_handler },
     { .uri = "/api/settings",   .method = HTTP_POST,   .handler = settings_patch_handler },
     { .uri = "/api/logs",       .method = HTTP_GET,    .handler = logs_handler },
+    { .uri = "/api/pairing/start", .method = HTTP_POST, .handler = pairing_start_handler },
+    { .uri = "/api/pairing/stop",  .method = HTTP_POST, .handler = pairing_stop_handler },
 };
 
 #define NUM_URIS (sizeof(uris) / sizeof(uris[0]))
