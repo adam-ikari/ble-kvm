@@ -55,6 +55,6 @@
   #define HAS_RGB_LED            0
   #define HAS_TFT_DISPLAY        0
   #define HAS_BATTERY            0
-  #define HAS_USB                0
+  #define HAS_USB                1
   #define HAS_VOICE_INPUT     0
 #endif

@@ -13,7 +13,7 @@ set(EXTRA_REQUIRES "")
 
 if(BOARD STREQUAL "m5sticks3")
     list(APPEND COMPONENT_SRCS "tft_display.c" "power_manager.c" "input_mode.c" "imu_driver.c" "es8311_driver.c" "mic_driver.c" "voice_input.c")
-    list(APPEND EXTRA_REQUIRES "esp_lcd" "esp_driver_i2c")
+    list(APPEND EXTRA_REQUIRES "esp_lcd" "esp_driver_i2c" "esp_driver_i2s")
 elseif(BOARD STREQUAL "m5stamps3")
     list(APPEND COMPONENT_SRCS "rgb_led.c")
     list(APPEND EXTRA_REQUIRES "esp_driver_rmt")
@@ -21,17 +21,15 @@ else()
     list(APPEND COMPONENT_SRCS "gpio_led.c")
 endif()
 
-# USB modules (ESP32-S3 only)
-if(BOARD STREQUAL "m5sticks3" OR BOARD STREQUAL "m5stamps3")
-    list(APPEND COMPONENT_SRCS "usb_device.c" "usb_host.c")
-    list(APPEND EXTRA_REQUIRES "esp_tinyusb" "usb_host_hid")
-endif()
+# USB modules (all ESP32-S3 boards have USB-OTG)
+list(APPEND COMPONENT_SRCS "usb_device.c" "usb_host.c")
+list(APPEND EXTRA_REQUIRES "esp_tinyusb" "usb_host_hid")
 
 idf_component_register(
     SRCS ${COMPONENT_SRCS}
     INCLUDE_DIRS "."
     REQUIRES bt nvs_flash esp_driver_gpio esp_wifi esp_netif
-             esp_event json esp_http_server ${EXTRA_REQUIRES}
+             esp_event json esp_http_server esp_driver_i2s esp_driver_i2c ${EXTRA_REQUIRES}
 )
 
 if(BOARD STREQUAL "m5sticks3")

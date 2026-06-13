@@ -127,7 +127,7 @@ static void sse_remove_client(int fd)
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Root request, sending %u bytes gzip", web_dist_index_gz_len);
+    ESP_LOGI(TAG, "Root request, sending %u bytes gzip", web_dist_index_html_gz_len);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
@@ -136,8 +136,8 @@ static esp_err_t root_handler(httpd_req_t *req)
      * httpd_resp_send() pushes everything at once and blocks when the buffer
      * is full, causing the client to time out and disconnect (ECONNRESET). */
     esp_err_t err;
-    const char *data = (const char *)web_dist_index_gz;
-    size_t remaining = web_dist_index_gz_len;
+    const char *data = (const char *)web_dist_index_html_gz;
+    size_t remaining = web_dist_index_html_gz_len;
     size_t offset = 0;
 
     while (remaining > 0) {
@@ -461,8 +461,7 @@ static esp_err_t scan_get_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
 
-    char results[2048];
-    ble_central_get_scan_results_json(results, sizeof(results));
+    const char *results = ble_central_get_scan_results_json();
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, results);
     return ESP_OK;
