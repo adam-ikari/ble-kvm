@@ -10,13 +10,15 @@ Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to
 |-------|-----------|---------|-------------|---------|---------|-----|
 | **M5StickS3** | ✅ | ✅ | ✅ | ✅ | ✅ | None (GPU backlight) |
 | **M5StampS3** | ❌ | ❌ | ❌ | ✅ | ❌ | RGB (WS2812) |
-| **Generic ESP32-S3** | ❌ | ❌ | ❌ | ❌ | ❌ | GPIO LEDs |
+| **Generic ESP32-S3** | ❌ | ❌ | ❌ | ✅ | ❌ | GPIO LEDs |
 
 ## Features
 
-- **BLE HID KVM** — Connect up to 2 PCs via Bluetooth BLE HID. A 3rd PC can be connected via USB device mode. Keyboard and mouse input transparently routed to the active connection.
+- **BLE HID KVM** — Connect up to 2 PCs via Bluetooth BLE HID. A 3rd PC can be connected via USB device mode. Keyboard and mouse input transparently routed to the active connection. Default BLE broadcast name is `KVM-<MAC last 4>` (e.g., `KVM-A3F2`), customizable via Web panel.
 - **USB Device Mode** — Appears as a USB HID keyboard/mouse to a connected host via the USB OTG port.
 - **USB Host Mode** — Accepts external USB HID keyboard/mouse, forwarding their input over BLE to connected PCs.
+- **Pairing Mode** — New PC connections require entering pairing mode via Web panel (60s timeout). Already-paired PCs auto-reconnect without pairing mode.
+- **Web Auth Persistence** — Auth token stored in NVS and browser localStorage. Survives browser close and device reboot.
 
 ### M5StickS3 Only
 
@@ -28,10 +30,10 @@ Bluetooth Low Energy KVM (Keyboard-Video-Mouse) switch for ESP32-S3. Connects to
 ### All Boards
 
 - **WiFi Web Configuration** — Built-in web server (STA or AP mode) for configuring WiFi, paired PCs, USB mode, anti-idle, voice ASR settings, and more. Protected by a configurable auth token.
-- **Two-Button UI** — Primary button: short-press switches PCs, long-press starts voice input. Secondary button: short-press cycles input modes, 5s-long-press warns factory reset, 10s executes.
-- **Anti-Idle** — Periodic HID keep-alive signals to prevent host sleep/lock.
+- **Two-Button UI** — Primary button: short-press switches PCs (PPT mode: Page Down), double-click grants web auth (PPT mode: Page Up), long-press starts voice input. Secondary button: short-press cycles input modes (PPT mode: switch to KVM), 5s-long-press warns factory reset, 10s executes.
+- **Anti-Idle** — Periodic HID keep-alive signals sent to ALL connected PCs independently to prevent host sleep/lock.
 - **Web Debug Log** — Real-time ESP-IDF log streaming over SSE on the web dashboard. Disabled by default, toggle in settings.
-- **Factory Reset** — Via secondary button (10s hold). Erases all NVS settings and reboots.
+- **Factory Reset** — Two-step confirmation on all hardware: 5s hold warns (LED fast blink), continue to 10s to execute. Release between 5-10s cancels. Erases all NVS settings and reboots.
 
 ## Prerequisites
 
@@ -147,13 +149,14 @@ All settings are persisted in NVS flash and configurable via the web dashboard a
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `device_name` | `KVM-XXXX` | BLE broadcast name (default: MAC-derived) |
 | `auth_token` | 9-char random | Web UI authentication token |
 | `wifi_ssid` / `wifi_password` | — | STA mode credentials |
 | `wifi_enabled` | false | Enable WiFi on boot |
 | `usb_mode` | 0 (disabled) | 0=BLE only (2 PCs), 1=USB device (adds 3rd PC), 2=USB host |
 | `active_pc` | 0 | Currently selected PC (0-1 BLE, 2 USB device) |
-| `anti_idle_enabled` | false | Send periodic HID keep-alive |
-| `anti_idle_interval_sec` | — | Interval between keep-alive signals |
+| `anti_idle_enabled` | false | Send periodic HID keep-alive to all connected PCs |
+| `anti_idle_interval_sec` | 240 | Interval between keep-alive signals (seconds) |
 | `input_mode` | 0 (KVM) | 0=KVM, 1=PPT air mouse |
 | `air_mouse_sensitivity` | 5 | IMU sensitivity (1-10) |
 | `voice_asr_enabled` | false | Enable voice input feature |
@@ -172,6 +175,8 @@ The web server exposes a REST API (all endpoints require `Authorization: Bearer 
 | `GET` | `/api/settings` | All configuration values |
 | `PATCH` | `/api/settings` | Update configuration |
 | `POST` | `/api/switch` | Switch active PC |
+| `POST` | `/api/pairing/start` | Enter BLE pairing mode (60s timeout) |
+| `POST` | `/api/pairing/stop` | Exit BLE pairing mode |
 | `GET` | `/api/logs` | SSE stream of real-time ESP-IDF logs |
 
 ## Voice Input (M5StickS3)
@@ -208,9 +213,10 @@ SPM1423 MEMS Mic (analog) → ES8311 ADC → I2S → ESP32-S3
 
 ## Factory Reset
 
-**Method 1 — Button (M5StickS3):** Hold the secondary button for 5 seconds (TFT shows warning), continue holding for another 5 seconds (10s total) to execute.
+**Two-step confirmation (all hardware):** Hold the button for 5 seconds (LED fast-blinks warning), continue holding for another 5 seconds (10s total) to execute. Release between 5-10s to cancel. Erases all NVS data and reboots.
 
-Hold the secondary button for 5 seconds (TFT shows warning), continue holding for another 5 seconds (10s total) to erase all NVS data and reboot.
+- **M5StickS3:** Use the secondary (side) button
+- **M5StampS3 / Generic:** Use the primary button
 
 ## License
 
