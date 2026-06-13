@@ -243,6 +243,13 @@ static esp_err_t status_handler(httpd_req_t *req)
 
     cJSON_AddNumberToObject(root, "input_mode", cfg->input_mode);
     cJSON_AddNumberToObject(root, "air_mouse_sensitivity", cfg->air_mouse_sensitivity);
+    cJSON_AddNumberToObject(root, "screen_off_timeout_sec", cfg->screen_off_timeout_sec);
+    cJSON_AddNumberToObject(root, "sleep_timeout_sec", cfg->sleep_timeout_sec);
+#if HAS_BATTERY
+    cJSON_AddStringToObject(root, "sleep_state",
+        pm_sleep_get_state() == PM_STATE_ACTIVE ? "active" :
+        pm_sleep_get_state() == PM_STATE_SCREEN_OFF ? "screen_off" : "sleep");
+#endif
 
     cJSON_AddNumberToObject(root, "usb_mode", cfg->usb_mode);
     cJSON *usb = cJSON_CreateObject();
@@ -758,6 +765,8 @@ static esp_err_t settings_get_handler(httpd_req_t *req)
     }
     cJSON_AddStringToObject(root, "voice_lang", cfg->voice_lang);
     cJSON_AddNumberToObject(root, "voice_input_mode", cfg->voice_input_mode);
+    cJSON_AddNumberToObject(root, "screen_off_timeout_sec", cfg->screen_off_timeout_sec);
+    cJSON_AddNumberToObject(root, "sleep_timeout_sec", cfg->sleep_timeout_sec);
 
     char *json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -917,6 +926,20 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
 
     if (voice_en_item || voice_appid_item || voice_ak_item || voice_lang_item || voice_im_item) {
         config_save_voice();
+    }
+
+    cJSON *scr_off = cJSON_GetObjectItem(body, "screen_off_timeout_sec");
+    if (cJSON_IsNumber(scr_off)) {
+        cfg->screen_off_timeout_sec = (uint16_t)scr_off->valueint;
+    }
+
+    cJSON *sleep_to = cJSON_GetObjectItem(body, "sleep_timeout_sec");
+    if (cJSON_IsNumber(sleep_to)) {
+        cfg->sleep_timeout_sec = (uint16_t)sleep_to->valueint;
+    }
+
+    if (scr_off || sleep_to) {
+        config_save_sleep();
     }
 
     cJSON *factory_reset = cJSON_GetObjectItem(body, "factory_reset");
