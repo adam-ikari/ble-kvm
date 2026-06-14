@@ -81,9 +81,7 @@ void input_mode_init(void)
     };
     esp_timer_create(&timer_args, &consumer_release_timer);
 
-    extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
-    i2c_master_bus_handle_t i2c = tft_display_get_i2c_bus();
-    imu_driver_init(i2c);
+    /* IMU is already initialized by main.c before input_mode_init() */
 
     if (current_mode == INPUT_MODE_PPT_AIR) {
         start_air_mouse();

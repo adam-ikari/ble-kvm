@@ -1119,8 +1119,12 @@ void web_server_init(void)
     config.send_wait_timeout = 10;
 
     if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start web server");
-        return;
+        ESP_LOGW(TAG, "Web server start failed, retrying after delay...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (httpd_start(&server, &config) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start web server");
+            return;
+        }
     }
 
     for (int i = 0; i < (int)NUM_URIS; i++) {
