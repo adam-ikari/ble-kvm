@@ -128,7 +128,7 @@ void anti_idle_set_enabled(bool enabled)
 
 void anti_idle_set_interval(uint16_t interval_sec)
 {
-    if (interval_sec < 30) interval_sec = 30;
+    if (interval_sec < 10) interval_sec = 10;
     if (interval_sec > 3600) interval_sec = 3600;
     config_get_mutable()->anti_idle_interval_sec = interval_sec;
     config_save_anti_idle();
