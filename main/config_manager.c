@@ -259,11 +259,11 @@ static void load_sleep(void)
 {
     uint16_t val = 0;
     esp_err_t err = nvs_get_u16(nvs_config, "scr_off_to", &val);
-    config.screen_off_timeout_sec = (err == ESP_OK) ? val : 30;
+    config.screen_off_timeout_sec = (err == ESP_OK) ? val : 120;
 
     val = 0;
     err = nvs_get_u16(nvs_config, "sleep_to", &val);
-    config.sleep_timeout_sec = (err == ESP_OK) ? val : 60;
+    config.sleep_timeout_sec = (err == ESP_OK) ? val : 300;
 }
 
 void config_save_sleep(void)
