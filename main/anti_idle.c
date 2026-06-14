@@ -119,6 +119,14 @@ void anti_idle_on_activity(void)
     }
 }
 
+void anti_idle_on_pc_connected(uint8_t pc_id)
+{
+    if (pc_id < 1 || pc_id > 3) return;
+    portENTER_CRITICAL(&anti_idle_spinlock);
+    pc_last_activity[pc_id - 1] = esp_timer_get_time();
+    portEXIT_CRITICAL(&anti_idle_spinlock);
+}
+
 void anti_idle_set_enabled(bool enabled)
 {
     config_get_mutable()->anti_idle_enabled = enabled;

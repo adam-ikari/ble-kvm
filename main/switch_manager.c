@@ -4,6 +4,7 @@
 #include "board.h"
 #include "config_manager.h"
 #include "input_mode.h"
+#include "anti_idle.h"
 #include "web_server.h"
 #if HAS_BATTERY
 #include "power_manager.h"
@@ -465,6 +466,7 @@ void switch_manager_on_pc_connected(uint8_t pc_id, uint16_t conn_handle)
 {
     ESP_LOGI(TAG, "PC%d connected (handle=%d)", pc_id, conn_handle);
     update_led_state();
+    anti_idle_on_pc_connected(pc_id);
     web_server_notify_connection(pc_id, true);
 #if HAS_BATTERY
     pm_sleep_on_pc_connected(pc_id);
