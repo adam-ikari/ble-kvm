@@ -140,6 +140,6 @@ void app_main(void)
     /* Step 7: Web server */
     web_server_init();
 
-    ESP_LOGI(TAG, "BLE-KVM initialized, token: %s, usb_mode: %d",
-             config_get()->auth_token, cfg->usb_mode);
+    ESP_LOGI(TAG, "BLE-KVM initialized, usb_mode: %d",
+             cfg->usb_mode);
 }

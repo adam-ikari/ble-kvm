@@ -330,6 +330,11 @@ char *wifi_manager_get_ap_ssid(void)
     return ap_ssid;
 }
 
+bool wifi_manager_is_netif_ready(void)
+{
+    return esp_netif_is_netif_up(ap_netif);
+}
+
 // Legacy compat
 bool wifi_manager_is_connected(void) __attribute__((alias("wifi_manager_is_sta_connected")));
 char *wifi_manager_get_ip(void) __attribute__((alias("wifi_manager_get_sta_ip")));

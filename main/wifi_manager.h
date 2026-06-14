@@ -22,3 +22,4 @@ bool wifi_manager_is_ap_active(void);
 char *wifi_manager_get_sta_ip(void);
 char *wifi_manager_get_ap_ip(void);
 char *wifi_manager_get_ap_ssid(void);
+bool wifi_manager_is_netif_ready(void);

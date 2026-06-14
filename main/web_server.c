@@ -68,7 +68,7 @@ static bool check_auth(httpd_req_t *req)
 void web_server_grant_auth(void)
 {
     const kvm_config_t *cfg = config_get();
-    ESP_LOGI(TAG, "Web access granted, token: %s", cfg->auth_token);
+    ESP_LOGI(TAG, "Web access granted");
 
     /* Push token to all SSE clients */
     char data[128];
@@ -1119,17 +1119,17 @@ void web_server_init(void)
     config.recv_wait_timeout = 10;
     config.send_wait_timeout = 10;
 
-    /* Retry httpd_start with backoff — WiFi netif may not be fully up yet.
-     * On M5StickS3, additional init (TFT/IMU/PMIC) delays app_main enough
-     * that the TCP/IP stack isn't ready when we reach here. */
-    int retries = 0;
-    while (httpd_start(&server, &config) != ESP_OK) {
-        if (++retries >= 5) {
-            ESP_LOGE(TAG, "Failed to start web server after %d retries", retries);
-            return;
-        }
-        ESP_LOGW(TAG, "Web server start failed (attempt %d), retrying...", retries);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    /* Wait for WiFi netif to be up before starting HTTP server.
+     * On M5StickS3, the extra init (TFT/IMU/PMIC) shifts app_main's
+     * timing and we may reach here before the TCP/IP stack is ready. */
+    for (int i = 0; i < 30; i++) {
+        if (wifi_manager_is_netif_ready()) break;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    if (httpd_start(&server, &config) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start web server");
+        return;
     }
 
     for (int i = 0; i < (int)NUM_URIS; i++) {
