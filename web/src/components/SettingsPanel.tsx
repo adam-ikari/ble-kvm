@@ -92,6 +92,7 @@ export function SettingsPanel({ status, toast, refresh }: Props) {
                 setSettings({ ...settings, anti_idle_interval: val });
               }}
               onMouseUp={() => update({ anti_idle_interval: settings.anti_idle_interval }, 'Interval')}
+              onTouchEnd={() => update({ anti_idle_interval: settings.anti_idle_interval }, 'Interval')}
             />
           </div>
         )}
