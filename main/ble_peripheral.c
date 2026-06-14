@@ -336,15 +336,18 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
             /* Check if we should accept this connection */
             bool accept = pairing_mode;
 
-            /* Also accept if this device is already paired (bonded) */
+            /* Also accept if this device matches a previously paired PC */
             if (!accept) {
                 const kvm_config_t *cfg = config_get();
-                for (int i = 0; i < MAX_PC_COUNT - 1; i++) {  /* PC1 and PC2 only */
-                    if (cfg->pcs[i].identity_addr[0] != 0 || cfg->pcs[i].identity_addr[1] != 0) {
-                        /* A saved PC exists — accept because bonding ensures only
-                         * the paired device can re-encrypt and connect successfully */
-                        accept = true;
-                        break;
+                struct ble_gap_conn_desc desc;
+                int rc = ble_gap_conn_find(event->connect.conn_handle, &desc);
+                if (rc == 0) {
+                    for (int i = 0; i < MAX_PC_COUNT - 1; i++) {  /* PC1 and PC2 only */
+                        if (memcmp(cfg->pcs[i].identity_addr, desc.peer_id_addr.val, 6) == 0) {
+                            /* Connecting device matches a saved PC identity address — accept */
+                            accept = true;
+                            break;
+                        }
                     }
                 }
             }
