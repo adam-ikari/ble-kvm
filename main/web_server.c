@@ -1119,13 +1119,17 @@ void web_server_init(void)
     config.recv_wait_timeout = 10;
     config.send_wait_timeout = 10;
 
-    if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGW(TAG, "Web server start failed, retrying after delay...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        if (httpd_start(&server, &config) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start web server");
+    /* Retry httpd_start with backoff — WiFi netif may not be fully up yet.
+     * On M5StickS3, additional init (TFT/IMU/PMIC) delays app_main enough
+     * that the TCP/IP stack isn't ready when we reach here. */
+    int retries = 0;
+    while (httpd_start(&server, &config) != ESP_OK) {
+        if (++retries >= 5) {
+            ESP_LOGE(TAG, "Failed to start web server after %d retries", retries);
             return;
         }
+        ESP_LOGW(TAG, "Web server start failed (attempt %d), retrying...", retries);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     for (int i = 0; i < (int)NUM_URIS; i++) {
