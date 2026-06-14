@@ -436,7 +436,8 @@ static esp_err_t logs_handler(httpd_req_t *req)
 
 static esp_err_t events_handler(httpd_req_t *req)
 {
-    if (!check_auth(req)) return ESP_OK;
+    /* SSE endpoint is exempt from auth check — it's the channel
+     * through which the auth token is delivered on double-click. */
 
     if (sse_add_client(req) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Too many SSE clients");
