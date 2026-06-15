@@ -92,6 +92,7 @@ bool power_manager_is_usb_powered(void)
 /* ── Sleep state machine ─────────────────────────────────────────── */
 
 #include "config_manager.h"
+#include "event_bus.h"
 #include "indicator.h"
 #include "esp_wifi.h"
 #if HAS_TFT_DISPLAY
@@ -120,6 +121,9 @@ static void enter_screen_off(void)
     sleep_state = PM_STATE_SCREEN_OFF;
     ESP_LOGI(TAG_SLEEP, "Screen off");
 
+    app_evt_scr_off_state_changed_t evt = { .off = true };
+    APP_EVENT_POST(APP_EVENT_SCR_OFF_STATE_CHANGED, &evt, sizeof(evt));
+
 #if HAS_TFT_DISPLAY
     tft_display_freeze(true);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_7, 0);
@@ -133,6 +137,9 @@ static void exit_screen_off(void)
     sleep_state = PM_STATE_ACTIVE;
     ESP_LOGI(TAG_SLEEP, "Screen on");
 
+    app_evt_scr_off_state_changed_t evt = { .off = false };
+    APP_EVENT_POST(APP_EVENT_SCR_OFF_STATE_CHANGED, &evt, sizeof(evt));
+
 #if HAS_TFT_DISPLAY
     tft_display_freeze(false);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_7, 128);
@@ -145,6 +152,9 @@ static void enter_sleep(void)
     if (sleep_state == PM_STATE_SLEEP) return;
     sleep_state = PM_STATE_SLEEP;
     ESP_LOGI(TAG_SLEEP, "Entering sleep");
+
+    app_evt_sleep_state_changed_t evt = { .state = PM_STATE_SLEEP };
+    APP_EVENT_POST(APP_EVENT_SLEEP_STATE_CHANGED, &evt, sizeof(evt));
 
     indicator_set_state(IND_SLEEP);
 
@@ -166,6 +176,9 @@ static void enter_sleep(void)
     /* ── Woke up ── */
     ESP_LOGI(TAG_SLEEP, "Woke from sleep");
     sleep_state = PM_STATE_ACTIVE;
+
+    evt.state = PM_STATE_ACTIVE;
+    APP_EVENT_POST(APP_EVENT_SLEEP_STATE_CHANGED, &evt, sizeof(evt));
 
     /* Re-enable Wi-Fi */
     esp_wifi_start();
@@ -191,7 +204,7 @@ static void sleep_timer_cb(void *arg)
     if (mode == 0 /* KVM */) {
         if (!all_pcs_disconnected()) return;
     }
-    /* PPT mode: IMU-idle check handled by pm_sleep_on_imu_motion()
+    /* PPT mode: IMU-idle check handled by on_imu_motion()
      * resetting the timer. If we reach here in PPT mode, IMU has been
      * idle long enough. */
 
@@ -217,6 +230,62 @@ static void restart_sleep_timer(void)
     if (cfg->sleep_timeout_sec > 0 && sleep_state != PM_STATE_SLEEP) {
         esp_timer_start_once(sleep_timer,
                              (uint64_t)cfg->sleep_timeout_sec * 1000000);
+    }
+}
+
+/* ── event handlers ──────────────────────────────────────────────── */
+
+static void on_hid_activity(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
+{
+    if (sleep_state == PM_STATE_SCREEN_OFF) {
+        exit_screen_off();
+    }
+    restart_screen_off_timer();
+}
+
+static void on_pc_connected(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
+{
+    portENTER_CRITICAL(&pm_spinlock);
+    connected_pc_count++;
+    portEXIT_CRITICAL(&pm_spinlock);
+
+    esp_timer_stop(sleep_timer);
+    if (sleep_state == PM_STATE_SCREEN_OFF) {
+        exit_screen_off();
+    }
+    restart_screen_off_timer();
+}
+
+static void on_pc_disconnected(void *arg, esp_event_base_t base,
+                               int32_t event_id, void *event_data)
+{
+    portENTER_CRITICAL(&pm_spinlock);
+    if (connected_pc_count > 0) connected_pc_count--;
+    portEXIT_CRITICAL(&pm_spinlock);
+
+    if (all_pcs_disconnected()) {
+        restart_sleep_timer();
+    }
+}
+
+static void on_imu_motion(void *arg, esp_event_base_t base,
+                          int32_t event_id, void *event_data)
+{
+    if (config_get()->input_mode == 1 /* PPT */) {
+        restart_sleep_timer();
+    }
+}
+
+static void on_config_changed(void *arg, esp_event_base_t base,
+                              int32_t event_id, void *event_data)
+{
+    app_evt_config_changed_t *evt = (app_evt_config_changed_t *)event_data;
+    if (evt->field == CONFIG_FIELD_SCREEN_OFF_TIMEOUT) {
+        restart_screen_off_timer();
+    } else if (evt->field == CONFIG_FIELD_SLEEP_TIMEOUT) {
+        restart_sleep_timer();
     }
 }
 
@@ -247,49 +316,18 @@ void pm_sleep_init(void)
 
     ESP_LOGI(TAG_SLEEP, "Sleep state machine init (scr=%ds, slp=%ds)",
              cfg->screen_off_timeout_sec, cfg->sleep_timeout_sec);
+
+    /* Subscribe to events */
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_ACTIVITY, on_hid_activity, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_CONNECTED, on_pc_connected, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_DISCONNECTED, on_pc_disconnected, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_INPUT_IMU_MOTION, on_imu_motion, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_CONFIG_CHANGED, on_config_changed, NULL);
 }
 
 pm_sleep_state_t pm_sleep_get_state(void)
 {
     return sleep_state;
-}
-
-void pm_sleep_on_activity(void)
-{
-    if (sleep_state == PM_STATE_SCREEN_OFF) {
-        exit_screen_off();
-    }
-    restart_screen_off_timer();
-}
-
-void pm_sleep_on_pc_connected(uint8_t pc_id)
-{
-    portENTER_CRITICAL(&pm_spinlock);
-    connected_pc_count++;
-    portEXIT_CRITICAL(&pm_spinlock);
-
-    /* New connection — cancel sleep timer */
-    esp_timer_stop(sleep_timer);
-    pm_sleep_on_activity();
-}
-
-void pm_sleep_on_pc_disconnected(uint8_t pc_id)
-{
-    portENTER_CRITICAL(&pm_spinlock);
-    if (connected_pc_count > 0) connected_pc_count--;
-    portEXIT_CRITICAL(&pm_spinlock);
-
-    if (all_pcs_disconnected()) {
-        restart_sleep_timer();
-    }
-}
-
-void pm_sleep_on_imu_motion(void)
-{
-    /* Only relevant in PPT mode; reset sleep timer on IMU activity */
-    if (config_get()->input_mode == 1 /* PPT */) {
-        restart_sleep_timer();
-    }
 }
 
 void pm_sleep_enter_force(void)

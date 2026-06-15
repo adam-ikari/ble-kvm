@@ -22,17 +22,9 @@ typedef enum {
 #if HAS_BATTERY
 void pm_sleep_init(void);
 pm_sleep_state_t pm_sleep_get_state(void);
-void pm_sleep_on_activity(void);        /* call on any user interaction */
-void pm_sleep_on_pc_connected(uint8_t pc_id);
-void pm_sleep_on_pc_disconnected(uint8_t pc_id);
-void pm_sleep_on_imu_motion(void);      /* call on IMU change detected */
 void pm_sleep_enter_force(void);        /* force sleep — not used in v1.0 */
 #else
 static inline void pm_sleep_init(void) {}
 static inline pm_sleep_state_t pm_sleep_get_state(void) { return PM_STATE_ACTIVE; }
-static inline void pm_sleep_on_activity(void) {}
-static inline void pm_sleep_on_pc_connected(uint8_t pc_id) { (void)pc_id; }
-static inline void pm_sleep_on_pc_disconnected(uint8_t pc_id) { (void)pc_id; }
-static inline void pm_sleep_on_imu_motion(void) {}
 static inline void pm_sleep_enter_force(void) {}
 #endif
