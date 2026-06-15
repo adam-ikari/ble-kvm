@@ -88,6 +88,14 @@ static void restart_timer(void)
     portEXIT_CRITICAL(&anti_idle_spinlock);
 }
 
+/* Forward declarations for event handlers used in anti_idle_init */
+static void on_hid_activity(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data);
+static void on_pc_connected(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data);
+static void on_config_changed(void *arg, esp_event_base_t base,
+                              int32_t event_id, void *event_data);
+
 void anti_idle_init(void)
 {
     const esp_timer_create_args_t timer_args = {
@@ -141,4 +149,14 @@ static void on_config_changed(void *arg, esp_event_base_t base,
         evt->field == CONFIG_FIELD_ANTI_IDLE_INTERVAL) {
         restart_timer();
     }
+}
+
+void anti_idle_set_enabled(bool enabled)
+{
+    config_update_bool(CONFIG_FIELD_ANTI_IDLE_ENABLED, enabled);
+}
+
+void anti_idle_set_interval(uint16_t interval_sec)
+{
+    config_update_u16(CONFIG_FIELD_ANTI_IDLE_INTERVAL, interval_sec);
 }
