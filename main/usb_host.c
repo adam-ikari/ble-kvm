@@ -1,4 +1,5 @@
 #include "usb_host.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,8 +11,6 @@
 static const char *TAG = "usb_host";
 static bool kb_connected = false;
 static bool ms_connected = false;
-static usb_host_keyboard_cb_t kb_cb = NULL;
-static usb_host_mouse_cb_t ms_cb = NULL;
 static hid_host_device_handle_t kb_handle = NULL;
 static hid_host_device_handle_t ms_handle = NULL;
 static TaskHandle_t usb_host_task_handle = NULL;
@@ -38,10 +37,12 @@ static void hid_interface_cb(hid_host_device_handle_t dev,
         hid_host_dev_params_t params;
         hid_host_device_get_params(dev, &params);
 
-        if (params.proto == HID_PROTOCOL_KEYBOARD && kb_cb) {
-            kb_cb(data, (uint8_t)data_len);
-        } else if (params.proto == HID_PROTOCOL_MOUSE && ms_cb) {
-            ms_cb(data, (uint8_t)data_len);
+        if (params.proto == HID_PROTOCOL_KEYBOARD) {
+            app_evt_hid_data_t hid_evt = { .data = data, .len = (uint8_t)data_len };
+            APP_EVENT_POST(APP_EVENT_HID_KEYBOARD_DATA, &hid_evt, sizeof(hid_evt));
+        } else if (params.proto == HID_PROTOCOL_MOUSE) {
+            app_evt_hid_data_t hid_evt = { .data = data, .len = (uint8_t)data_len };
+            APP_EVENT_POST(APP_EVENT_HID_MOUSE_DATA, &hid_evt, sizeof(hid_evt));
         }
     } else if (event == HID_HOST_INTERFACE_EVENT_DISCONNECTED) {
         hid_host_dev_params_t params;
@@ -93,11 +94,8 @@ static void hid_driver_cb(hid_host_device_handle_t dev,
     hid_host_device_start(dev);
 }
 
-void usb_host_init(usb_host_keyboard_cb_t kb_cb_arg, usb_host_mouse_cb_t ms_cb_arg)
+void usb_host_init(void)
 {
-    kb_cb = kb_cb_arg;
-    ms_cb = ms_cb_arg;
-
     /* Install USB Host library */
     usb_host_config_t host_cfg = {
         .skip_phy_setup = false,

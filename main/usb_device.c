@@ -1,4 +1,5 @@
 #include "usb_device.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "tinyusb.h"
 #include "tusb.h"
@@ -53,10 +54,12 @@ static void tusb_event_cb(tinyusb_event_t *event, void *arg)
     case TINYUSB_EVENT_ATTACHED:
         usb_mounted = true;
         ESP_LOGI(TAG, "USB device mounted");
+        APP_EVENT_POST(APP_EVENT_USB_DEVICE_CONNECTED, NULL, 0);
         break;
     case TINYUSB_EVENT_DETACHED:
         usb_mounted = false;
         ESP_LOGI(TAG, "USB device unmounted");
+        APP_EVENT_POST(APP_EVENT_USB_DEVICE_DISCONNECTED, NULL, 0);
         break;
     default:
         break;

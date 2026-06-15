@@ -112,7 +112,7 @@ void app_main(void)
         usb_device_init();
         ESP_LOGI(TAG, "USB Device mode active");
     } else if (cfg->usb_mode == USB_MODE_HOST) {
-        usb_host_init(hid_router_on_usb_keyboard, hid_router_on_usb_mouse);
+        usb_host_init();
         ESP_LOGI(TAG, "USB Host mode active");
     } else {
         ESP_LOGI(TAG, "USB disabled (BLE-only)");
