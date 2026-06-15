@@ -10,6 +10,7 @@
 #include "ble_central.h"
 #include "switch_manager.h"
 #include "hid_router.h"
+#include "event_bus.h"
 #include "anti_idle.h"
 #include "board.h"
 #if HAS_BATTERY || HAS_INPUT_MODES || HAS_VOICE_INPUT
@@ -37,15 +38,6 @@
 
 static const char *TAG = "main";
 
-static void on_pc_conn_event(uint8_t pc_id, uint16_t conn_handle, bool connected)
-{
-    if (connected) {
-        switch_manager_on_pc_connected(pc_id, conn_handle);
-    } else {
-        switch_manager_on_pc_disconnected(pc_id);
-    }
-}
-
 static void ble_host_task(void *param)
 {
     nimble_port_run();
@@ -55,6 +47,14 @@ static void ble_host_task(void *param)
 static void ble_on_sync(void)
 {
     ble_peripheral_start_advertising();
+}
+
+static void on_factory_reset(void *arg, esp_event_base_t base,
+                             int32_t event_id, void *event_data)
+{
+    ESP_LOGW(TAG, "Factory reset triggered!");
+    nvs_flash_erase();
+    esp_restart();
 }
 
 void app_main(void)
@@ -67,6 +67,9 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    /* Step 2: Event bus — must be before any module that uses events */
+    event_bus_init();
 
     config_manager_init();
     web_log_init();
@@ -136,7 +139,9 @@ void app_main(void)
     switch_manager_init();
     hid_router_init();
     anti_idle_init();
-    ble_peripheral_register_conn_cb(on_pc_conn_event);
+
+    /* Step 9: Subscribe to FACTORY_RESET event */
+    APP_EVENT_SUBSCRIBE(APP_EVENT_FACTORY_RESET, on_factory_reset, NULL);
 
     /* Step 7: Done — web server starts via WIFI_EVENT_AP_START callback */
     ESP_LOGI(TAG, "BLE-KVM initialized, usb_mode: %d",
