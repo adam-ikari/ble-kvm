@@ -68,17 +68,6 @@ static bool check_auth(httpd_req_t *req)
     return false;
 }
 
-void web_server_grant_auth(void)
-{
-    const kvm_config_t *cfg = config_get();
-    ESP_LOGI(TAG, "Web access granted");
-
-    /* Push token to all SSE clients */
-    char data[128];
-    snprintf(data, sizeof(data), "{\"token\":\"%s\"}", cfg->auth_token);
-    sse_broadcast("auth", data);
-}
-
 /* ── SSE helpers ──────────────────────────────────────────────────── */
 
 static void sse_send_to_client(sse_client_t *client, const char *event, const char *data)
@@ -475,7 +464,7 @@ static esp_err_t scan_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
 
-    ble_central_start_scan();
+    APP_EVENT_POST(APP_EVENT_SCAN_START_REQUEST, NULL, 0);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
@@ -1007,7 +996,7 @@ static esp_err_t pairing_start_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
 
-    ble_peripheral_enter_pairing_mode();
+    APP_EVENT_POST(APP_EVENT_PAIRING_START, NULL, 0);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
@@ -1026,7 +1015,7 @@ static esp_err_t pairing_stop_handler(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
 
-    ble_peripheral_exit_pairing_mode();
+    APP_EVENT_POST(APP_EVENT_PAIRING_STOP, NULL, 0);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "ok", true);
@@ -1038,29 +1027,61 @@ static esp_err_t pairing_stop_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Notification functions ───────────────────────────────────────── */
+/* ── SSE event handlers ────────────────────────────────────────────── */
 
-void web_server_notify_switch(uint8_t active_pc)
+static void on_pc_switched(void *arg, esp_event_base_t base,
+                           int32_t event_id, void *event_data)
 {
+    app_evt_pc_switched_t *evt = (app_evt_pc_switched_t *)event_data;
     char data[32];
-    snprintf(data, sizeof(data), "{\"active_pc\":%d}", active_pc);
+    snprintf(data, sizeof(data), "{\"active_pc\":%d}", evt->new_pc);
     sse_broadcast("switch", data);
 }
 
-void web_server_notify_connection(uint8_t pc_id, bool connected)
+static void on_pc_connection(void *arg, esp_event_base_t base,
+                             int32_t event_id, void *event_data)
 {
+    bool connected = (event_id == APP_EVENT_PC_CONNECTED);
+    uint8_t pc_id;
+    if (connected) {
+        pc_id = ((app_evt_pc_connected_t *)event_data)->pc_id;
+    } else {
+        pc_id = ((app_evt_pc_disconnected_t *)event_data)->pc_id;
+    }
     char data[64];
     snprintf(data, sizeof(data), "{\"pc_id\":%d,\"connected\":%s}",
              pc_id, connected ? "true" : "false");
     sse_broadcast("connection", data);
 }
 
-void web_server_notify_device(const char *device_type, bool connected)
+static void on_device_connection(void *arg, esp_event_base_t base,
+                                  int32_t event_id, void *event_data)
 {
+    const char *device_type = NULL;
+    bool connected = true;
+
+    switch (event_id) {
+    case APP_EVENT_KB_CONNECTED:  device_type = "keyboard"; break;
+    case APP_EVENT_KB_DISCONNECTED: device_type = "keyboard"; connected = false; break;
+    case APP_EVENT_MS_CONNECTED:  device_type = "mouse"; break;
+    case APP_EVENT_MS_DISCONNECTED: device_type = "mouse"; connected = false; break;
+    default: return;
+    }
+
     char data[64];
     snprintf(data, sizeof(data), "{\"device\":\"%s\",\"connected\":%s}",
              device_type, connected ? "true" : "false");
     sse_broadcast("device", data);
+}
+
+static void on_web_auth_granted(void *arg, esp_event_base_t base,
+                                 int32_t event_id, void *event_data)
+{
+    const kvm_config_t *cfg = config_get();
+    ESP_LOGI(TAG, "Web access granted");
+    char data[128];
+    snprintf(data, sizeof(data), "{\"token\":\"%s\"}", cfg->auth_token);
+    sse_broadcast("auth", data);
 }
 
 /* ── URI registration table ───────────────────────────────────────── */
@@ -1146,6 +1167,16 @@ static void web_server_start(void)
 
     /* Register log SSE broadcast so web_log can push to log clients */
     web_log_register_sse_broadcast(log_sse_broadcast);
+
+    /* Subscribe to events for SSE broadcast */
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_SWITCHED, on_pc_switched, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_CONNECTED, on_pc_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_DISCONNECTED, on_pc_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_KB_CONNECTED, on_device_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_KB_DISCONNECTED, on_device_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_MS_CONNECTED, on_device_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_MS_DISCONNECTED, on_device_connection, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_WEB_AUTH_GRANTED, on_web_auth_granted, NULL);
 
     ESP_LOGI(TAG, "Web server started on port %d", config.server_port);
 }
