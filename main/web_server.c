@@ -552,14 +552,14 @@ static esp_err_t pairings_post_handler(httpd_req_t *req)
             kvm_config_t *cfg = config_get_mutable();
             memcpy(cfg->keyboard.mac, addr, 6);
             cfg->keyboard.addr_type = (uint8_t)atype_item->valueint;
-            config_save_input_devices();
+            config_update_blob(CONFIG_FIELD_KEYBOARD_MAC, &cfg->keyboard, sizeof(cfg->keyboard));
         } else if (strcmp(role_item->valuestring, "mouse") == 0) {
             ble_central_connect_mouse(addr, (uint8_t)atype_item->valueint);
             /* Save MAC to config so it auto-reconnects on reboot */
             kvm_config_t *cfg = config_get_mutable();
             memcpy(cfg->mouse.mac, addr, 6);
             cfg->mouse.addr_type = (uint8_t)atype_item->valueint;
-            config_save_input_devices();
+            config_update_blob(CONFIG_FIELD_MOUSE_MAC, &cfg->mouse, sizeof(cfg->mouse));
         } else {
             cJSON_Delete(body);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid role");
@@ -610,7 +610,7 @@ static esp_err_t pairings_delete_handler(httpd_req_t *req)
             cfg->pcs[idx].name[0] = '\0';
             cfg->pcs[idx].conn_handle = 0;
             cfg->pcs[idx].connected = false;
-            config_save_pcs();
+            config_update_blob(CONFIG_FIELD_PC_NAMES, cfg->pcs, sizeof(cfg->pcs));
             deleted = true;
             ESP_LOGI(TAG, "Deleted pairing for PC%d", pair_id);
         }
@@ -730,11 +730,10 @@ static esp_err_t wifi_patch_handler(httpd_req_t *req)
     cJSON *pass_item = cJSON_GetObjectItem(body, "password");
     if (cJSON_IsString(ssid_item)) {
         kvm_config_t *cfg = config_get_mutable();
-        strncpy(cfg->wifi_ssid, ssid_item->valuestring, sizeof(cfg->wifi_ssid) - 1);
+        config_update_str(CONFIG_FIELD_WIFI_SSID, ssid_item->valuestring);
         if (cJSON_IsString(pass_item)) {
-            strncpy(cfg->wifi_password, pass_item->valuestring, sizeof(cfg->wifi_password) - 1);
+            config_update_str(CONFIG_FIELD_WIFI_PASSWORD, pass_item->valuestring);
         }
-        config_save_wifi();
         wifi_manager_start_sta(cfg->wifi_ssid, cfg->wifi_password);
     }
 
@@ -843,14 +842,14 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
                 cfg->pcs[i].name[DEVICE_NAME_MAX - 1] = '\0';
             }
         }
-        config_save_pcs();
+        config_update_blob(CONFIG_FIELD_PC_NAMES, cfg->pcs, sizeof(cfg->pcs));
     }
 
     cJSON *dev_name = cJSON_GetObjectItem(body, "device_name");
     if (cJSON_IsString(dev_name)) {
         strncpy(cfg->device_name, dev_name->valuestring, DEVICE_NAME_MAX - 1);
         cfg->device_name[DEVICE_NAME_MAX - 1] = '\0';
-        config_save_device_name();
+        config_update_str(CONFIG_FIELD_DEVICE_NAME, cfg->device_name);
         /* Update BLE advertising name */
         ble_svc_gap_device_name_set(cfg->device_name);
     }
@@ -882,8 +881,7 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
     if (cJSON_IsNumber(sens)) {
         int val = sens->valueint;
         if (val >= 1 && val <= 10) {
-            config_get_mutable()->air_mouse_sensitivity = (uint8_t)val;
-            config_save_input_mode();
+            config_update_u8(CONFIG_FIELD_AIR_MOUSE_SENSITIVITY, (uint8_t)val);
         }
     }
 
@@ -892,8 +890,7 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
         int val = usb_mode_item->valueint;
         if (val >= USB_MODE_DISABLED && val <= USB_MODE_HOST) {
             uint8_t old_mode = cfg->usb_mode;
-            cfg->usb_mode = (uint8_t)val;
-            config_save_usb_mode();
+            config_update_u8(CONFIG_FIELD_USB_MODE, (uint8_t)val);
             if (val != old_mode) {
                 cJSON_Delete(body);
                 cJSON *root = cJSON_CreateObject();
@@ -916,14 +913,14 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
     if (cJSON_IsString(kb_name)) {
         strncpy(cfg->keyboard.name, kb_name->valuestring, DEVICE_NAME_MAX - 1);
         cfg->keyboard.name[DEVICE_NAME_MAX - 1] = '\0';
-        config_save_input_devices();
+        config_update_blob(CONFIG_FIELD_KEYBOARD_MAC, &cfg->keyboard, sizeof(cfg->keyboard));
     }
 
     cJSON *ms_name = cJSON_GetObjectItem(body, "mouse_name");
     if (cJSON_IsString(ms_name)) {
         strncpy(cfg->mouse.name, ms_name->valuestring, DEVICE_NAME_MAX - 1);
         cfg->mouse.name[DEVICE_NAME_MAX - 1] = '\0';
-        config_save_input_devices();
+        config_update_blob(CONFIG_FIELD_MOUSE_MAC, &cfg->mouse, sizeof(cfg->mouse));
     }
 
     cJSON *web_log_item = cJSON_GetObjectItem(body, "web_log_enabled");
@@ -937,49 +934,40 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
 
     cJSON *voice_en_item = cJSON_GetObjectItem(body, "voice_asr_enabled");
     if (cJSON_IsBool(voice_en_item)) {
-        cfg->voice_asr_enabled = cJSON_IsTrue(voice_en_item);
+        config_update_bool(CONFIG_FIELD_VOICE_ASR_ENABLED, cJSON_IsTrue(voice_en_item));
     }
 
     cJSON *voice_appid_item = cJSON_GetObjectItem(body, "voice_asr_appid");
     if (cJSON_IsNumber(voice_appid_item)) {
-        cfg->voice_asr_appid = (uint32_t)voice_appid_item->valuedouble;
+        config_update_u32(CONFIG_FIELD_VOICE_ASR_APPID, (uint32_t)voice_appid_item->valuedouble);
     }
 
     cJSON *voice_ak_item = cJSON_GetObjectItem(body, "voice_asr_api_key");
     if (cJSON_IsString(voice_ak_item) && strlen(voice_ak_item->valuestring) > 0) {
         if (strncmp(voice_ak_item->valuestring, "****", 4) != 0) {
-            strncpy(cfg->voice_asr_api_key, voice_ak_item->valuestring, 64);
-            cfg->voice_asr_api_key[64] = '\0';
+            config_update_str(CONFIG_FIELD_VOICE_ASR_API_KEY, voice_ak_item->valuestring);
         }
     }
 
     cJSON *voice_lang_item = cJSON_GetObjectItem(body, "voice_lang");
     if (cJSON_IsString(voice_lang_item)) {
-        strncpy(cfg->voice_lang, voice_lang_item->valuestring, sizeof(cfg->voice_lang) - 1);
+        config_update_str(CONFIG_FIELD_VOICE_LANG, voice_lang_item->valuestring);
     }
 
     cJSON *voice_im_item = cJSON_GetObjectItem(body, "voice_input_mode");
     if (cJSON_IsNumber(voice_im_item)) {
         int val = voice_im_item->valueint;
-        if (val >= 0 && val <= 2) cfg->voice_input_mode = (uint8_t)val;
-    }
-
-    if (voice_en_item || voice_appid_item || voice_ak_item || voice_lang_item || voice_im_item) {
-        config_save_voice();
+        if (val >= 0 && val <= 2) config_update_u8(CONFIG_FIELD_VOICE_INPUT_MODE, (uint8_t)val);
     }
 
     cJSON *scr_off = cJSON_GetObjectItem(body, "screen_off_timeout_sec");
     if (cJSON_IsNumber(scr_off)) {
-        cfg->screen_off_timeout_sec = (uint16_t)scr_off->valueint;
+        config_update_u16(CONFIG_FIELD_SCREEN_OFF_TIMEOUT, (uint16_t)scr_off->valueint);
     }
 
     cJSON *sleep_to = cJSON_GetObjectItem(body, "sleep_timeout_sec");
     if (cJSON_IsNumber(sleep_to)) {
-        cfg->sleep_timeout_sec = (uint16_t)sleep_to->valueint;
-    }
-
-    if (scr_off || sleep_to) {
-        config_save_sleep();
+        config_update_u16(CONFIG_FIELD_SLEEP_TIMEOUT, (uint16_t)sleep_to->valueint);
     }
 
     cJSON *factory_reset = cJSON_GetObjectItem(body, "factory_reset");

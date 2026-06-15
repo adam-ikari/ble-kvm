@@ -259,11 +259,9 @@ void wifi_manager_start_sta(const char *ssid, const char *password)
     strncpy((char *)sta_config.sta.password, password, sizeof(sta_config.sta.password) - 1);
 
     // Save to config
-    kvm_config_t *cfg = config_get_mutable();
-    strncpy(cfg->wifi_ssid, ssid, sizeof(cfg->wifi_ssid) - 1);
-    strncpy(cfg->wifi_password, password, sizeof(cfg->wifi_password) - 1);
-    cfg->wifi_enabled = true;
-    config_save_wifi();
+    config_update_str(CONFIG_FIELD_WIFI_SSID, ssid);
+    config_update_str(CONFIG_FIELD_WIFI_PASSWORD, password);
+    config_update_bool(CONFIG_FIELD_WIFI_ENABLED, true);
 
     if (current_mode == KVM_WIFI_OFF || current_mode == KVM_WIFI_AP_ONLY) {
         current_mode = (current_mode == KVM_WIFI_AP_ONLY) ? KVM_WIFI_APSTA : KVM_WIFI_STA_ONLY;
@@ -299,9 +297,7 @@ void wifi_manager_stop_sta(void)
     }
 
     // Save to config
-    kvm_config_t *cfg = config_get_mutable();
-    cfg->wifi_enabled = false;
-    config_save_wifi();
+    config_update_bool(CONFIG_FIELD_WIFI_ENABLED, false);
 
     ESP_LOGI(TAG, "STA stopped");
 }

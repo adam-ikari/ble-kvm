@@ -139,7 +139,7 @@ static void switch_task_func(void *arg)
                     vTaskDelay(pdMS_TO_TICKS(100));
 
                     cfg->active_pc = new_pc;
-                    config_save_active_pc();
+                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, new_pc);
 
                     ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
                     update_led_state();
@@ -484,13 +484,13 @@ void switch_manager_on_pc_disconnected(uint8_t pc_id)
             if (candidate == 3) {
                 if (is_pc3_connected()) {
                     cfg->active_pc = candidate;
-                    config_save_active_pc();
+                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
                     break;
                 }
             } else {
                 if (ble_peripheral_is_pc_connected(candidate - 1)) {  /* 0-indexed */
                     cfg->active_pc = candidate;
-                    config_save_active_pc();
+                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
                     break;
                 }
             }

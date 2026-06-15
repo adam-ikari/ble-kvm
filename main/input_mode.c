@@ -100,8 +100,7 @@ void input_mode_set(input_mode_t mode)
     if (mode == current_mode) return;
     if (current_mode == INPUT_MODE_PPT_AIR) stop_air_mouse();
     current_mode = mode;
-    config_get_mutable()->input_mode = (uint8_t)mode;
-    config_save_input_mode();
+    config_update_u8(CONFIG_FIELD_INPUT_MODE, (uint8_t)mode);
     if (mode == INPUT_MODE_PPT_AIR) start_air_mouse();
     ESP_LOGI(TAG, "Mode set to %d", mode);
 }

@@ -1,4 +1,5 @@
 #include "config_manager.h"
+#include "event_bus.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -51,6 +52,8 @@ static void load_active_pc(void)
         config.active_pc = 1;
     }
 }
+
+static void config_save_auth_token(void);
 
 static void load_auth_token(void)
 {
@@ -127,38 +130,10 @@ kvm_config_t *config_get_mutable(void)
     return &config;
 }
 
-void config_save_pcs(void)
-{
-    ESP_ERROR_CHECK(nvs_set_blob(nvs_ble, "pcs", config.pcs, sizeof(config.pcs)));
-    ESP_ERROR_CHECK(nvs_commit(nvs_ble));
-}
-
-void config_save_input_devices(void)
-{
-    ESP_ERROR_CHECK(nvs_set_blob(nvs_ble, "keyboard", &config.keyboard, sizeof(config.keyboard)));
-    ESP_ERROR_CHECK(nvs_set_blob(nvs_ble, "mouse", &config.mouse, sizeof(config.mouse)));
-    ESP_ERROR_CHECK(nvs_commit(nvs_ble));
-}
-
-void config_save_active_pc(void)
-{
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "active_pc", config.active_pc));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
-void config_save_auth_token(void)
+static void config_save_auth_token(void)
 {
     ESP_ERROR_CHECK(nvs_set_str(nvs_config, "auth_token", config.auth_token));
     ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
-void config_save_wifi(void)
-{
-    ESP_ERROR_CHECK(nvs_set_str(nvs_wifi, "ssid", config.wifi_ssid));
-    ESP_ERROR_CHECK(nvs_set_str(nvs_wifi, "password", config.wifi_password));
-    uint8_t enabled = config.wifi_enabled ? 1 : 0;
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_wifi, "enabled", enabled));
-    ESP_ERROR_CHECK(nvs_commit(nvs_wifi));
 }
 
 void config_generate_auth_token(void)
@@ -169,6 +144,9 @@ void config_generate_auth_token(void)
     }
     config.auth_token[AUTH_TOKEN_LEN - 1] = '\0';
     ESP_LOGI(TAG, "Generated auth token: %s", config.auth_token);
+
+    app_evt_config_changed_t evt = { .field = CONFIG_FIELD_AUTH_TOKEN };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
 }
 
 static void load_anti_idle(void)
@@ -182,14 +160,6 @@ static void load_anti_idle(void)
     config.anti_idle_interval_sec = (err == ESP_OK) ? interval : 240;
 }
 
-void config_save_anti_idle(void)
-{
-    uint8_t enabled = config.anti_idle_enabled ? 1 : 0;
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "anti_idle", enabled));
-    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "anti_idle_ivl", config.anti_idle_interval_sec));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
 static void load_input_mode(void)
 {
     esp_err_t err = nvs_get_u8(nvs_config, "input_mode", &config.input_mode);
@@ -199,25 +169,12 @@ static void load_input_mode(void)
     config.air_mouse_sensitivity = (err == ESP_OK && sens >= 1 && sens <= 10) ? sens : 5;
 }
 
-void config_save_input_mode(void)
-{
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "input_mode", config.input_mode));
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "air_sens", config.air_mouse_sensitivity));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
 static void load_usb_mode(void)
 {
     esp_err_t err = nvs_get_u8(nvs_config, "usb_mode", &config.usb_mode);
     if (err != ESP_OK || config.usb_mode > USB_MODE_HOST) {
         config.usb_mode = USB_MODE_DISABLED;
     }
-}
-
-void config_save_usb_mode(void)
-{
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "usb_mode", config.usb_mode));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
 }
 
 static void load_voice(void)
@@ -244,17 +201,6 @@ static void load_voice(void)
     config.voice_input_mode = (err == ESP_OK && im <= 2) ? im : 0;
 }
 
-void config_save_voice(void)
-{
-    uint8_t enabled = config.voice_asr_enabled ? 1 : 0;
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "voice_en", enabled));
-    ESP_ERROR_CHECK(nvs_set_u32(nvs_config, "voice_appid", config.voice_asr_appid));
-    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "voice_ak", config.voice_asr_api_key));
-    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "voice_lang", config.voice_lang));
-    ESP_ERROR_CHECK(nvs_set_u8(nvs_config, "voice_im", config.voice_input_mode));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
 static void load_sleep(void)
 {
     uint16_t val = 0;
@@ -266,13 +212,6 @@ static void load_sleep(void)
     config.sleep_timeout_sec = (err == ESP_OK) ? val : 300;
 }
 
-void config_save_sleep(void)
-{
-    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "scr_off_to", config.screen_off_timeout_sec));
-    ESP_ERROR_CHECK(nvs_set_u16(nvs_config, "sleep_to", config.sleep_timeout_sec));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
 static void load_device_name(void)
 {
     size_t required_size = sizeof(config.device_name);
@@ -282,10 +221,197 @@ static void load_device_name(void)
     }
 }
 
-void config_save_device_name(void)
+/* ── config_update_*() API ──────────────────────────────────────────────── */
+
+void config_update_u8(config_field_t field, uint8_t value)
 {
-    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "dev_name", config.device_name));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
+    switch (field) {
+    case CONFIG_FIELD_ACTIVE_PC:
+        if (value < 1 || value > 3) return;
+        config.active_pc = value;
+        nvs_set_u8(nvs_config, "active_pc", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_INPUT_MODE:
+        if (value > 1) return;
+        config.input_mode = value;
+        nvs_set_u8(nvs_config, "input_mode", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_USB_MODE:
+        if (value > USB_MODE_HOST) return;
+        config.usb_mode = value;
+        nvs_set_u8(nvs_config, "usb_mode", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_VOICE_INPUT_MODE:
+        if (value > 2) return;
+        config.voice_input_mode = value;
+        nvs_set_u8(nvs_config, "voice_im", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_AIR_MOUSE_SENSITIVITY:
+        if (value < 1 || value > 10) return;
+        config.air_mouse_sensitivity = value;
+        nvs_set_u8(nvs_config, "air_sens", value);
+        nvs_commit(nvs_config);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_u8: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
+}
+
+void config_update_u16(config_field_t field, uint16_t value)
+{
+    switch (field) {
+    case CONFIG_FIELD_ANTI_IDLE_INTERVAL:
+        if (value < 10) value = 10;
+        if (value > 3600) value = 3600;
+        config.anti_idle_interval_sec = value;
+        nvs_set_u16(nvs_config, "anti_idle_ivl", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_SCREEN_OFF_TIMEOUT:
+        config.screen_off_timeout_sec = value;
+        nvs_set_u16(nvs_config, "scr_off_to", value);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_SLEEP_TIMEOUT:
+        config.sleep_timeout_sec = value;
+        nvs_set_u16(nvs_config, "sleep_to", value);
+        nvs_commit(nvs_config);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_u16: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
+}
+
+void config_update_u32(config_field_t field, uint32_t value)
+{
+    switch (field) {
+    case CONFIG_FIELD_VOICE_ASR_APPID:
+        config.voice_asr_appid = value;
+        nvs_set_u32(nvs_config, "voice_appid", value);
+        nvs_commit(nvs_config);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_u32: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
+}
+
+void config_update_bool(config_field_t field, bool value)
+{
+    uint8_t v = value ? 1 : 0;
+
+    switch (field) {
+    case CONFIG_FIELD_ANTI_IDLE_ENABLED:
+        config.anti_idle_enabled = value;
+        nvs_set_u8(nvs_config, "anti_idle", v);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_WIFI_ENABLED:
+        config.wifi_enabled = value;
+        nvs_set_u8(nvs_wifi, "enabled", v);
+        nvs_commit(nvs_wifi);
+        break;
+    case CONFIG_FIELD_VOICE_ASR_ENABLED:
+        config.voice_asr_enabled = value;
+        nvs_set_u8(nvs_config, "voice_en", v);
+        nvs_commit(nvs_config);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_bool: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
+}
+
+void config_update_str(config_field_t field, const char *value)
+{
+    if (!value) return;
+
+    switch (field) {
+    case CONFIG_FIELD_WIFI_SSID:
+        strncpy(config.wifi_ssid, value, sizeof(config.wifi_ssid) - 1);
+        config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
+        nvs_set_str(nvs_wifi, "ssid", config.wifi_ssid);
+        nvs_commit(nvs_wifi);
+        break;
+    case CONFIG_FIELD_WIFI_PASSWORD:
+        strncpy(config.wifi_password, value, sizeof(config.wifi_password) - 1);
+        config.wifi_password[sizeof(config.wifi_password) - 1] = '\0';
+        nvs_set_str(nvs_wifi, "password", config.wifi_password);
+        nvs_commit(nvs_wifi);
+        break;
+    case CONFIG_FIELD_DEVICE_NAME:
+        strncpy(config.device_name, value, DEVICE_NAME_MAX - 1);
+        config.device_name[DEVICE_NAME_MAX - 1] = '\0';
+        nvs_set_str(nvs_config, "dev_name", config.device_name);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_VOICE_ASR_API_KEY:
+        strncpy(config.voice_asr_api_key, value, 64);
+        config.voice_asr_api_key[64] = '\0';
+        nvs_set_str(nvs_config, "voice_ak", config.voice_asr_api_key);
+        nvs_commit(nvs_config);
+        break;
+    case CONFIG_FIELD_VOICE_LANG:
+        strncpy(config.voice_lang, value, sizeof(config.voice_lang) - 1);
+        config.voice_lang[sizeof(config.voice_lang) - 1] = '\0';
+        nvs_set_str(nvs_config, "voice_lang", config.voice_lang);
+        nvs_commit(nvs_config);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_str: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
+}
+
+void config_update_blob(config_field_t field, const void *data, size_t len)
+{
+    switch (field) {
+    case CONFIG_FIELD_PC_NAMES:
+        if (len != sizeof(config.pcs)) return;
+        memcpy(config.pcs, data, len);
+        nvs_set_blob(nvs_ble, "pcs", config.pcs, sizeof(config.pcs));
+        nvs_commit(nvs_ble);
+        break;
+    case CONFIG_FIELD_KEYBOARD_MAC:
+        if (len != sizeof(input_device_t)) return;
+        memcpy(&config.keyboard, data, len);
+        nvs_set_blob(nvs_ble, "keyboard", &config.keyboard, sizeof(config.keyboard));
+        nvs_commit(nvs_ble);
+        break;
+    case CONFIG_FIELD_MOUSE_MAC:
+        if (len != sizeof(input_device_t)) return;
+        memcpy(&config.mouse, data, len);
+        nvs_set_blob(nvs_ble, "mouse", &config.mouse, sizeof(config.mouse));
+        nvs_commit(nvs_ble);
+        break;
+    default:
+        ESP_LOGW(TAG, "config_update_blob: unsupported field %d", field);
+        return;
+    }
+
+    app_evt_config_changed_t evt = { .field = field };
+    APP_EVENT_POST(APP_EVENT_CONFIG_CHANGED, &evt, sizeof(evt));
 }
 
 void config_manager_deinit(void)

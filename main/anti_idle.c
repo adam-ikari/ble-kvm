@@ -129,8 +129,7 @@ void anti_idle_on_pc_connected(uint8_t pc_id)
 
 void anti_idle_set_enabled(bool enabled)
 {
-    config_get_mutable()->anti_idle_enabled = enabled;
-    config_save_anti_idle();
+    config_update_bool(CONFIG_FIELD_ANTI_IDLE_ENABLED, enabled);
     restart_timer();
 }
 
@@ -138,7 +137,6 @@ void anti_idle_set_interval(uint16_t interval_sec)
 {
     if (interval_sec < 10) interval_sec = 10;
     if (interval_sec > 3600) interval_sec = 3600;
-    config_get_mutable()->anti_idle_interval_sec = interval_sec;
-    config_save_anti_idle();
+    config_update_u16(CONFIG_FIELD_ANTI_IDLE_INTERVAL, interval_sec);
     restart_timer();
 }

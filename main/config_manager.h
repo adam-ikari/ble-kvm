@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "event_bus.h"
 
 #define MAX_PC_COUNT 3
 #define DEVICE_NAME_MAX 32
@@ -55,16 +56,13 @@ typedef struct {
 void config_manager_init(void);
 const kvm_config_t *config_get(void);
 kvm_config_t *config_get_mutable(void);
-void config_save_pcs(void);
-void config_save_input_devices(void);
-void config_save_active_pc(void);
-void config_save_auth_token(void);
-void config_save_wifi(void);
 void config_generate_auth_token(void);
-void config_save_anti_idle(void);
-void config_save_input_mode(void);
-void config_save_usb_mode(void);
-void config_save_voice(void);
-void config_save_sleep(void);
-void config_save_device_name(void);
 void config_manager_deinit(void);
+
+/* New config_update_*() API — validates, updates in-memory config, saves to NVS, posts APP_EVENT_CONFIG_CHANGED */
+void config_update_u8(config_field_t field, uint8_t value);
+void config_update_u16(config_field_t field, uint16_t value);
+void config_update_u32(config_field_t field, uint32_t value);
+void config_update_bool(config_field_t field, bool value);
+void config_update_str(config_field_t field, const char *value);
+void config_update_blob(config_field_t field, const void *data, size_t len);
