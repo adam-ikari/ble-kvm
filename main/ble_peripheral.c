@@ -1,5 +1,6 @@
 #include "ble_peripheral.h"
 #include "config_manager.h"
+#include "event_bus.h"
 #include "indicator.h"
 
 #include <string.h>
@@ -125,8 +126,6 @@ bool ble_peripheral_is_pairing_mode(void)
 {
     return pairing_mode;
 }
-
-static ble_peripheral_conn_cb_t conn_cb = NULL;
 
 /* Storage for characteristic value handles (filled at registration time) */
 static uint16_t keyboard_report_val_handle;
@@ -366,9 +365,11 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
                 pc_conns[slot].connected = true;
                 ESP_LOGI(TAG, "PC %d connected (handle=%d)", slot + 1, event->connect.conn_handle);
 
-                if (conn_cb) {
-                    conn_cb(slot + 1, event->connect.conn_handle, true);
-                }
+                app_evt_pc_connected_t evt = {
+                    .pc_id = slot + 1,
+                    .conn_handle = event->connect.conn_handle,
+                };
+                APP_EVENT_POST(APP_EVENT_PC_CONNECTED, &evt, sizeof(evt));
 
                 /* Exit pairing mode after successful connection */
                 if (pairing_mode) {
@@ -398,9 +399,8 @@ static int ble_gap_event_handler(struct ble_gap_event *event, void *arg)
                 pc_conns[slot].connected = false;
                 pc_conns[slot].conn_handle = 0;
 
-                if (conn_cb) {
-                    conn_cb(slot + 1, 0, false);
-                }
+                app_evt_pc_disconnected_t evt = { .pc_id = slot + 1 };
+                APP_EVENT_POST(APP_EVENT_PC_DISCONNECTED, &evt, sizeof(evt));
             }
         }
 
@@ -586,13 +586,6 @@ int ble_peripheral_send_consumer_key(uint16_t conn_handle, uint16_t usage_code)
 {
     uint8_t data[2] = {usage_code & 0xFF, (usage_code >> 8) & 0xFF};
     return ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_CONSUMER, data, 2);
-}
-
-/* ----- Callback Registration ----- */
-
-void ble_peripheral_register_conn_cb(ble_peripheral_conn_cb_t cb)
-{
-    conn_cb = cb;
 }
 
 /* ----- Init ----- */

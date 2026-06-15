@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "config_manager.h"
+#include "event_bus.h"
 
 void ble_peripheral_init(void);
 void ble_peripheral_start_advertising(void);
@@ -16,6 +17,3 @@ bool ble_peripheral_is_pc_connected(uint8_t pc_id);
 void ble_peripheral_enter_pairing_mode(void);
 void ble_peripheral_exit_pairing_mode(void);
 bool ble_peripheral_is_pairing_mode(void);
-
-typedef void (*ble_peripheral_conn_cb_t)(uint8_t pc_id, uint16_t conn_handle, bool connected);
-void ble_peripheral_register_conn_cb(ble_peripheral_conn_cb_t cb);
