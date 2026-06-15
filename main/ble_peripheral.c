@@ -2,6 +2,7 @@
 #include "config_manager.h"
 #include "event_bus.h"
 #include "indicator.h"
+#include "switch_manager.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -588,6 +589,67 @@ int ble_peripheral_send_consumer_key(uint16_t conn_handle, uint16_t usage_code)
     return ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_CONSUMER, data, 2);
 }
 
+/* ----- Event Handlers ----- */
+
+static void on_hid_forward_keyboard(void *arg, esp_event_base_t base,
+                                     int32_t event_id, void *event_data)
+{
+    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
+    uint16_t conn_handle = switch_manager_get_active_conn_handle();
+    if (conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
+    ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_KEYBOARD, evt->data, evt->len);
+}
+
+static void on_hid_forward_mouse(void *arg, esp_event_base_t base,
+                                  int32_t event_id, void *event_data)
+{
+    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
+    uint16_t conn_handle = switch_manager_get_active_conn_handle();
+    if (conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
+    ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_MOUSE, evt->data, evt->len);
+}
+
+static void on_hid_consumer_key(void *arg, esp_event_base_t base,
+                                 int32_t event_id, void *event_data)
+{
+    app_evt_consumer_key_t *evt = (app_evt_consumer_key_t *)event_data;
+    ble_peripheral_send_consumer_key(evt->conn_handle, evt->usage_code);
+}
+
+static void on_anti_idle_nudge(void *arg, esp_event_base_t base,
+                                int32_t event_id, void *event_data)
+{
+    app_evt_anti_idle_nudge_t *evt = (app_evt_anti_idle_nudge_t *)event_data;
+    uint16_t conn = ble_peripheral_get_conn_handle(evt->pc_id - 1);
+    if (conn == 0 || conn == 0xFFFF) return;
+    uint8_t report1[] = {0x00, 0x01, 0x00, 0x00};
+    ble_peripheral_send_hid_report(conn, HID_REPORT_ID_MOUSE, report1, sizeof(report1));
+    vTaskDelay(pdMS_TO_TICKS(20));
+    uint8_t report2[] = {0x00, 0xFF, 0x00, 0x00};
+    ble_peripheral_send_hid_report(conn, HID_REPORT_ID_MOUSE, report2, sizeof(report2));
+}
+
+static void on_pairing_start(void *arg, esp_event_base_t base,
+                             int32_t event_id, void *event_data)
+{
+    ble_peripheral_enter_pairing_mode();
+}
+
+static void on_pairing_stop(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
+{
+    ble_peripheral_exit_pairing_mode();
+}
+
+static void on_config_changed(void *arg, esp_event_base_t base,
+                              int32_t event_id, void *event_data)
+{
+    app_evt_config_changed_t *evt = (app_evt_config_changed_t *)event_data;
+    if (evt->field == CONFIG_FIELD_DEVICE_NAME) {
+        ble_svc_gap_device_name_set(config_get()->device_name);
+    }
+}
+
 /* ----- Init ----- */
 
 void ble_peripheral_init(void)
@@ -636,4 +698,13 @@ void ble_peripheral_init(void)
     }
 
     ESP_LOGI(TAG, "BLE peripheral initialized");
+
+    /* Subscribe to events */
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_FORWARD_KEYBOARD, on_hid_forward_keyboard, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_FORWARD_MOUSE, on_hid_forward_mouse, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_CONSUMER_KEY, on_hid_consumer_key, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_ANTI_IDLE_NUDGE, on_anti_idle_nudge, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PAIRING_START, on_pairing_start, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PAIRING_STOP, on_pairing_stop, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_CONFIG_CHANGED, on_config_changed, NULL);
 }
