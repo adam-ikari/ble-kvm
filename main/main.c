@@ -135,7 +135,6 @@ void app_main(void)
     /* Step 6: Input & routing */
     switch_manager_init();
     hid_router_init();
-    hid_router_register_activity_cb(anti_idle_on_activity);
     anti_idle_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
 

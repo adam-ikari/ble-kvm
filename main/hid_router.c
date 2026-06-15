@@ -2,6 +2,7 @@
 #include "switch_manager.h"
 #include "ble_peripheral.h"
 #include "config_manager.h"
+#include "event_bus.h"
 #include "host/ble_hs.h"
 #include "esp_log.h"
 #if HAS_USB
@@ -9,15 +10,25 @@
 #endif
 
 static const char *TAG = "hid_router";
-static hid_activity_cb_t activity_cb = NULL;
 
-void hid_router_register_activity_cb(hid_activity_cb_t cb)
+static void hid_keyboard_data_handler(void *arg, esp_event_base_t base,
+                                       int32_t event_id, void *event_data)
 {
-    activity_cb = cb;
+    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
+    hid_router_forward_keyboard(evt->data, evt->len);
+}
+
+static void hid_mouse_data_handler(void *arg, esp_event_base_t base,
+                                    int32_t event_id, void *event_data)
+{
+    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
+    hid_router_forward_mouse(evt->data, evt->len);
 }
 
 void hid_router_init(void)
 {
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_KEYBOARD_DATA, hid_keyboard_data_handler, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_MOUSE_DATA, hid_mouse_data_handler, NULL);
     ESP_LOGI(TAG, "HID router initialized");
 }
 
@@ -43,7 +54,7 @@ void hid_router_forward_keyboard(const uint8_t *report, uint8_t len)
         }
     }
 
-    if (activity_cb) activity_cb();
+    APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
 }
 
 void hid_router_forward_mouse(const uint8_t *report, uint8_t len)
@@ -68,7 +79,7 @@ void hid_router_forward_mouse(const uint8_t *report, uint8_t len)
         }
     }
 
-    if (activity_cb) activity_cb();
+    APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
 }
 
 void hid_router_on_usb_keyboard(const uint8_t *report, uint8_t len)
