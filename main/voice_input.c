@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "config_manager.h"
+#include "event_bus.h"
 #include "mic_driver.h"
 #include "hid_router.h"
 #include "wifi_manager.h"
@@ -268,6 +269,8 @@ static void voice_task_func(void *arg)
     if (!pcm_buf) {
         ESP_LOGE(TAG, "Failed to allocate PCM buffer");
         voice_state = VOICE_IDLE;
+        app_evt_voice_state_changed_t evt_idle = { .active = false };
+        APP_EVENT_POST(APP_EVENT_VOICE_STATE_CHANGED, &evt_idle, sizeof(evt_idle));
         vTaskDelete(NULL);
         return;
     }
@@ -323,9 +326,37 @@ static void voice_task_func(void *arg)
     }
     voice_state = VOICE_IDLE;
 
+    /* Notify subscribers that voice input is now idle */
+    {
+        app_evt_voice_state_changed_t evt_idle = { .active = false };
+        APP_EVENT_POST(APP_EVENT_VOICE_STATE_CHANGED, &evt_idle, sizeof(evt_idle));
+    }
+
     ESP_LOGI(TAG, "Voice session ended");
     vTaskDelete(NULL);
     voice_task_handle = NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* Event handlers                                                       */
+/* ------------------------------------------------------------------ */
+
+static void on_voice_start_request(void *arg, esp_event_base_t base,
+                                    int32_t event_id, void *event_data)
+{
+    if (!voice_input_is_active()) {
+        if (!voice_input_start()) {
+            ESP_LOGW(TAG, "Voice start failed (need WiFi/config)");
+        }
+    }
+}
+
+static void on_voice_stop_request(void *arg, esp_event_base_t base,
+                                  int32_t event_id, void *event_data)
+{
+    if (voice_input_is_active()) {
+        voice_input_stop();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,6 +366,8 @@ static void voice_task_func(void *arg)
 void voice_input_init(void)
 {
     finish_sem = xSemaphoreCreateBinary();
+    APP_EVENT_SUBSCRIBE(APP_EVENT_VOICE_START_REQUEST, on_voice_start_request, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_VOICE_STOP_REQUEST, on_voice_stop_request, NULL);
     ESP_LOGI(TAG, "Voice input initialized");
 }
 
@@ -403,6 +436,10 @@ bool voice_input_start(void)
     }
 
     voice_state = VOICE_CONNECTING;
+
+    /* Notify subscribers that voice input is now active */
+    app_evt_voice_state_changed_t evt_active = { .active = true };
+    APP_EVENT_POST(APP_EVENT_VOICE_STATE_CHANGED, &evt_active, sizeof(evt_active));
 
     /* Send START frame */
     cJSON *start = cJSON_CreateObject();
