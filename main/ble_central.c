@@ -4,7 +4,7 @@
 #include "host/ble_gatt.h"
 #include "host/util/util.h"
 #include "esp_log.h"
-#include "hid_router.h"
+#include "event_bus.h"
 #include "config_manager.h"
 
 #include <string.h>
@@ -279,6 +279,13 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
                      is_keyboard ? "Keyboard" : "Mouse",
                      event->connect.conn_handle);
 
+            /* Post connection event */
+            app_evt_device_connected_t evt = {
+                .conn_handle = event->connect.conn_handle
+            };
+            APP_EVENT_POST(is_keyboard ? APP_EVENT_KB_CONNECTED : APP_EVENT_MS_CONNECTED,
+                           &evt, sizeof(evt));
+
             /* Start GATT service discovery for HID Service */
             ble_uuid16_t hid_uuid = BLE_UUID16_INIT(BLE_SVC_HID_UUID16);
             rc = ble_gattc_disc_svc_by_uuid(event->connect.conn_handle,
@@ -323,6 +330,7 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
 
         if (event->disconnect.conn.conn_handle == keyboard_conn_handle) {
             ESP_LOGI(TAG, "Keyboard disconnected");
+            APP_EVENT_POST(APP_EVENT_KB_DISCONNECTED, NULL, 0);
             keyboard_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             memset(&keyboard_gatt, 0, sizeof(keyboard_gatt));
             memset(&keyboard_disc, 0, sizeof(keyboard_disc));
@@ -338,6 +346,7 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
             }
         } else if (event->disconnect.conn.conn_handle == mouse_conn_handle) {
             ESP_LOGI(TAG, "Mouse disconnected");
+            APP_EVENT_POST(APP_EVENT_MS_DISCONNECTED, NULL, 0);
             mouse_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             memset(&mouse_gatt, 0, sizeof(mouse_gatt));
             memset(&mouse_disc, 0, sizeof(mouse_disc));
@@ -355,7 +364,7 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
         break;
 
     case BLE_GAP_EVENT_NOTIFY_RX:
-        /* Forward HID reports to hid_router */
+        /* Post HID data events */
         {
             uint16_t ch = event->notify_rx.conn_handle;
             const uint8_t *data;
@@ -364,10 +373,14 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
             data = event->notify_rx.om->om_data;
             data_len = OS_MBUF_PKTLEN(event->notify_rx.om);
 
+            app_evt_hid_data_t hid_evt = {
+                .data = data,
+                .len = (uint8_t)data_len,
+            };
             if (ch == keyboard_conn_handle) {
-                hid_router_forward_keyboard(data, data_len);
+                APP_EVENT_POST(APP_EVENT_HID_KEYBOARD_DATA, &hid_evt, sizeof(hid_evt));
             } else if (ch == mouse_conn_handle) {
-                hid_router_forward_mouse(data, data_len);
+                APP_EVENT_POST(APP_EVENT_HID_MOUSE_DATA, &hid_evt, sizeof(hid_evt));
             }
         }
         break;
