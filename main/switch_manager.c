@@ -3,17 +3,11 @@
 #include "indicator.h"
 #include "board.h"
 #include "config_manager.h"
+#include "event_bus.h"
 #include "input_mode.h"
-#include "anti_idle.h"
-#include "web_server.h"
-#if HAS_BATTERY
-#include "power_manager.h"
-#endif
+#include "tft_display.h"
 #if HAS_USB
 #include "usb_device.h"
-#endif
-#if HAS_VOICE_INPUT
-#include "voice_input.h"
 #endif
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -21,8 +15,6 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "nvs_flash.h"
-#include "esp_system.h"
 
 static const char *TAG = "switch";
 
@@ -94,13 +86,53 @@ static void update_led_state(void)
     }
 }
 
-static void do_factory_reset(void)
+static void on_pc_connected(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
 {
-    ESP_LOGW(TAG, "Factory reset triggered!");
-    indicator_set_state(IND_PAIRING);
+    app_evt_pc_connected_t *evt = (app_evt_pc_connected_t *)event_data;
+    ESP_LOGI(TAG, "PC%d connected (handle=%d)", evt->pc_id, evt->conn_handle);
+    update_led_state();
+}
 
-    nvs_flash_erase();
-    esp_restart();
+static void on_pc_disconnected(void *arg, esp_event_base_t base,
+                               int32_t event_id, void *event_data)
+{
+    app_evt_pc_disconnected_t *evt = (app_evt_pc_disconnected_t *)event_data;
+    ESP_LOGI(TAG, "PC%d disconnected", evt->pc_id);
+
+    /* Auto-switch active PC if the disconnected PC was active */
+    kvm_config_t *cfg = config_get_mutable();
+    if (cfg->active_pc == evt->pc_id) {
+        for (uint8_t candidate = 1; candidate <= 3; candidate++) {
+            if (candidate == evt->pc_id) continue;
+            if (candidate == 3) {
+                if (is_pc3_connected()) {
+                    cfg->active_pc = candidate;
+                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
+                    break;
+                }
+            } else {
+                if (ble_peripheral_is_pc_connected(candidate - 1)) {
+                    cfg->active_pc = candidate;
+                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
+                    break;
+                }
+            }
+        }
+    }
+    update_led_state();
+}
+
+static void on_usb_device_connected(void *arg, esp_event_base_t base,
+                                     int32_t event_id, void *event_data)
+{
+    update_led_state();
+}
+
+static void on_usb_device_disconnected(void *arg, esp_event_base_t base,
+                                        int32_t event_id, void *event_data)
+{
+    update_led_state();
 }
 
 static void switch_task_func(void *arg)
@@ -108,9 +140,7 @@ static void switch_task_func(void *arg)
     uint8_t cmd;
     while (1) {
         if (xQueueReceive(switch_queue, &cmd, pdMS_TO_TICKS(100))) {
-#if HAS_BATTERY
-            pm_sleep_on_activity();
-#endif
+            APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
             if (cmd == CMD_SWITCH) {
                 if (input_mode_get() != INPUT_MODE_KVM) {
                     input_mode_on_primary_button();
@@ -143,7 +173,8 @@ static void switch_task_func(void *arg)
 
                     ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);
                     update_led_state();
-                    web_server_notify_switch(new_pc);
+                    app_evt_pc_switched_t evt = { .old_pc = old_pc, .new_pc = new_pc };
+                    APP_EVENT_POST(APP_EVENT_PC_SWITCHED, &evt, sizeof(evt));
                 }
             }
 #if HAS_SECONDARY_BUTTON
@@ -151,32 +182,21 @@ static void switch_task_func(void *arg)
                 if (input_mode_get() != INPUT_MODE_KVM) {
                     input_mode_on_secondary_button();
                 } else {
-                    extern void tft_display_toggle_page(void);
                     tft_display_toggle_page();
                 }
             }
 #endif
             else if (cmd == CMD_FACTORY_RST) {
-                do_factory_reset();
+                APP_EVENT_POST(APP_EVENT_FACTORY_RESET, NULL, 0);
             }
             else if (cmd == CMD_MODE_CYCLE) {
                 input_mode_cycle();
             }
             else if (cmd == CMD_VOICE_START) {
-#if HAS_VOICE_INPUT
-                if (!voice_input_is_active()) {
-                    if (!voice_input_start()) {
-                        ESP_LOGW(TAG, "Voice start failed (need WiFi/config)");
-                    }
-                }
-#endif
+                APP_EVENT_POST(APP_EVENT_VOICE_START_REQUEST, NULL, 0);
             }
             else if (cmd == CMD_VOICE_STOP) {
-#if HAS_VOICE_INPUT
-                if (voice_input_is_active()) {
-                    voice_input_stop();
-                }
-#endif
+                APP_EVENT_POST(APP_EVENT_VOICE_STOP_REQUEST, NULL, 0);
             }
             else if (cmd == CMD_FACTORY_WARN) {
                 ESP_LOGW(TAG, "Factory reset warning — hold 10s to confirm");
@@ -187,17 +207,15 @@ static void switch_task_func(void *arg)
                 update_led_state();
             }
             else if (cmd == CMD_WEB_AUTH) {
-                extern void web_server_grant_auth(void);
-                web_server_grant_auth();
+                APP_EVENT_POST(APP_EVENT_WEB_AUTH_GRANTED, NULL, 0);
                 ESP_LOGI(TAG, "Web auth granted via double-click");
             }
             else if (cmd == CMD_PPT_PAGE_UP) {
-#if HAS_INPUT_MODES
                 uint16_t conn = switch_manager_get_active_conn_handle();
                 if (conn != 0xFFFF && conn != 0) {
-                    ble_peripheral_send_consumer_key(conn, 0x004B); /* Page Up */
+                    app_evt_consumer_key_t evt = { .conn_handle = conn, .usage_code = 0x004B };
+                    APP_EVENT_POST(APP_EVENT_HID_CONSUMER_KEY, &evt, sizeof(evt));
                 }
-#endif
             }
         } else {
             update_led_state();
@@ -439,6 +457,13 @@ void switch_manager_init(void)
     };
     esp_timer_create(&dc_timer_args, &dc_timeout_timer);
 
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_CONNECTED, on_pc_connected, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_DISCONNECTED, on_pc_disconnected, NULL);
+#if HAS_USB
+    APP_EVENT_SUBSCRIBE(APP_EVENT_USB_DEVICE_CONNECTED, on_usb_device_connected, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_USB_DEVICE_DISCONNECTED, on_usb_device_disconnected, NULL);
+#endif
+
     ESP_LOGI(TAG, "Switch manager initialized");
 }
 
@@ -460,44 +485,4 @@ uint16_t switch_manager_get_active_conn_handle(void)
         return 0xFFFF;
     }
     return ble_peripheral_get_conn_handle(cfg->active_pc - 1);  /* 0-indexed */
-}
-
-void switch_manager_on_pc_connected(uint8_t pc_id, uint16_t conn_handle)
-{
-    ESP_LOGI(TAG, "PC%d connected (handle=%d)", pc_id, conn_handle);
-    update_led_state();
-    anti_idle_on_pc_connected(pc_id);
-    web_server_notify_connection(pc_id, true);
-#if HAS_BATTERY
-    pm_sleep_on_pc_connected(pc_id);
-#endif
-}
-
-void switch_manager_on_pc_disconnected(uint8_t pc_id)
-{
-    ESP_LOGI(TAG, "PC%d disconnected", pc_id);
-    web_server_notify_connection(pc_id, false);
-    kvm_config_t *cfg = config_get_mutable();
-    if (cfg->active_pc == pc_id) {
-        for (uint8_t candidate = 1; candidate <= 3; candidate++) {
-            if (candidate == pc_id) continue;
-            if (candidate == 3) {
-                if (is_pc3_connected()) {
-                    cfg->active_pc = candidate;
-                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
-                    break;
-                }
-            } else {
-                if (ble_peripheral_is_pc_connected(candidate - 1)) {  /* 0-indexed */
-                    cfg->active_pc = candidate;
-                    config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
-                    break;
-                }
-            }
-        }
-    }
-    update_led_state();
-#if HAS_BATTERY
-    pm_sleep_on_pc_disconnected(pc_id);
-#endif
 }
