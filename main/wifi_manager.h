@@ -9,7 +9,6 @@ typedef enum {
     KVM_WIFI_OFF,           // Wi-Fi 关闭
 } wifi_operating_mode_t;
 
-typedef void (*wifi_ready_cb_t)(void);
 
 void wifi_manager_init(void);
 void wifi_manager_set_mode(wifi_operating_mode_t mode);
@@ -25,4 +24,3 @@ char *wifi_manager_get_sta_ip(void);
 char *wifi_manager_get_ap_ip(void);
 char *wifi_manager_get_ap_ssid(void);
 bool wifi_manager_is_netif_ready(void);
-void wifi_manager_register_ready_cb(wifi_ready_cb_t cb);

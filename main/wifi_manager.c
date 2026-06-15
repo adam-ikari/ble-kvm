@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "config_manager.h"
+#include "event_bus.h"
 #include <string.h>
 
 static const char *TAG = "wifi";
@@ -16,12 +17,7 @@ static char ap_ssid[33] = {0};
 static esp_netif_t *ap_netif = NULL;
 static esp_netif_t *sta_netif = NULL;
 static bool wifi_initialized = false;
-static wifi_ready_cb_t ready_cb = NULL;
 
-void wifi_manager_register_ready_cb(wifi_ready_cb_t cb)
-{
-    ready_cb = cb;
-}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                 int32_t event_id, void *event_data)
@@ -30,7 +26,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         switch (event_id) {
         case WIFI_EVENT_AP_START:
             ESP_LOGI(TAG, "AP started, netif ready");
-            if (ready_cb) ready_cb();
+            APP_EVENT_POST(APP_EVENT_WIFI_AP_READY, NULL, 0);
             break;
         case WIFI_EVENT_AP_STACONNECTED:
             ESP_LOGI(TAG, "AP: client connected");
@@ -41,6 +37,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         case WIFI_EVENT_STA_DISCONNECTED:
             ESP_LOGI(TAG, "STA: disconnected, reconnecting...");
             sta_connected = false;
+            APP_EVENT_POST(APP_EVENT_WIFI_STA_DISCONNECTED, NULL, 0);
             if (current_mode == KVM_WIFI_STA_ONLY || current_mode == KVM_WIFI_APSTA) {
                 esp_wifi_connect();
             }
@@ -58,6 +55,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             snprintf(sta_ip, sizeof(sta_ip), IPSTR, IP2STR(&event->ip_info.ip));
             ESP_LOGI(TAG, "STA: got ip %s", sta_ip);
             sta_connected = true;
+            app_evt_wifi_sta_connected_t evt;
+            strncpy(evt.ip, sta_ip, sizeof(evt.ip) - 1);
+            evt.ip[sizeof(evt.ip) - 1] = '\0';
+            APP_EVENT_POST(APP_EVENT_WIFI_STA_CONNECTED, &evt, sizeof(evt));
             break;
         }
         case IP_EVENT_AP_STAIPASSIGNED: {
@@ -156,6 +157,9 @@ void wifi_manager_set_mode(wifi_operating_mode_t mode)
     }
 
     current_mode = mode;
+
+    app_evt_wifi_mode_changed_t evt = { .mode = mode };
+    APP_EVENT_POST(APP_EVENT_WIFI_MODE_CHANGED, &evt, sizeof(evt));
 
     // Apply new mode
     switch (mode) {

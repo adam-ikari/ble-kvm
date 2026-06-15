@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "config_manager.h"
+#include "event_bus.h"
 #include "switch_manager.h"
 #include "ble_central.h"
 #include "ble_peripheral.h"
@@ -1094,6 +1095,8 @@ static const httpd_uri_t uris[] = {
 
 /* ── Init ─────────────────────────────────────────────────────────── */
 
+static void web_server_start_handler(void *arg, esp_event_base_t base, int32_t id, void *data);
+
 void web_server_init(void)
 {
     sse_mutex = xSemaphoreCreateMutex();
@@ -1106,7 +1109,12 @@ void web_server_init(void)
      * WIFI_EVENT_AP_START fires when the TCP/IP stack is fully up —
      * this avoids the EADDRINUSE (errno 112) that occurs when
      * listen() is called before the LWIP stack has settled. */
-    wifi_manager_register_ready_cb(web_server_start);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_WIFI_AP_READY, web_server_start_handler, NULL);
+}
+
+static void web_server_start_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    web_server_start();
 }
 
 static void web_server_start(void)
