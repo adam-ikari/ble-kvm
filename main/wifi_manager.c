@@ -16,12 +16,22 @@ static char ap_ssid[33] = {0};
 static esp_netif_t *ap_netif = NULL;
 static esp_netif_t *sta_netif = NULL;
 static bool wifi_initialized = false;
+static wifi_ready_cb_t ready_cb = NULL;
+
+void wifi_manager_register_ready_cb(wifi_ready_cb_t cb)
+{
+    ready_cb = cb;
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                 int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
+        case WIFI_EVENT_AP_START:
+            ESP_LOGI(TAG, "AP started, netif ready");
+            if (ready_cb) ready_cb();
+            break;
         case WIFI_EVENT_AP_STACONNECTED:
             ESP_LOGI(TAG, "AP: client connected");
             break;

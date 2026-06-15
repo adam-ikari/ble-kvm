@@ -30,6 +30,8 @@
 static const char *TAG = "web_server";
 static httpd_handle_t server = NULL;
 
+static void web_server_start(void);
+
 #define FIRMWARE_VERSION "0.1.0"
 #define MAX_SSE_CLIENTS 4
 #define SSE_KEEPALIVE_INTERVAL_MS 15000
@@ -1112,6 +1114,15 @@ void web_server_init(void)
     log_mutex = xSemaphoreCreateMutex();
     memset(log_clients, 0, sizeof(log_clients));
 
+    /* Defer actual httpd_start until AP netif is ready.
+     * WIFI_EVENT_AP_START fires when the TCP/IP stack is fully up —
+     * this avoids the EADDRINUSE (errno 112) that occurs when
+     * listen() is called before the LWIP stack has settled. */
+    wifi_manager_register_ready_cb(web_server_start);
+}
+
+static void web_server_start(void)
+{
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = NUM_URIS + 4;
     config.stack_size = 8192;
@@ -1119,37 +1130,8 @@ void web_server_init(void)
     config.recv_wait_timeout = 10;
     config.send_wait_timeout = 10;
 
-    /* Wait for WiFi netif to be up before starting HTTP server.
-     * On M5StickS3, the extra init (TFT/IMU/PMIC) shifts app_main's
-     * timing and we may reach here before the TCP/IP stack is ready.
-     *
-     * The listen() failure (errno 112) is actually EADDRINUSE, not
-     * EHOSTDOWN. LWIP's errno.h maps EHOSTDOWN=112, but the Newlib
-     * toolchain maps EADDRINUSE=112 and EHOSTDOWN=117. When the netif
-     * isn't fully initialized, LWIP's tcp_bind may succeed but
-     * tcp_listen_with_backlog_and_err fails with ERR_USE because the
-     * port appears to be in use (a stale PCB or netif race). Retrying
-     * after a short delay gives the stack time to stabilize. */
-    for (int i = 0; i < 30; i++) {
-        if (wifi_manager_is_netif_ready()) break;
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    /* Retry httpd_start up to 3 times with a 1-second delay between
-     * attempts. This handles the transient EADDRINUSE (errno 112) that
-     * occurs when the LWIP TCP/IP stack hasn't fully settled after the
-     * netif comes up. */
-    esp_err_t start_err = ESP_FAIL;
-    for (int attempt = 0; attempt < 3; attempt++) {
-        start_err = httpd_start(&server, &config);
-        if (start_err == ESP_OK) break;
-        ESP_LOGW(TAG, "httpd_start attempt %d failed (err=0x%x), retrying...",
-                 attempt + 1, start_err);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-
-    if (start_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start web server after 3 attempts");
+    if (httpd_start(&server, &config) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start web server");
         return;
     }
 

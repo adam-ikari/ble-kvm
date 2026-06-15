@@ -101,7 +101,9 @@ void app_main(void)
     }
 #endif
 
-    /* Step 3: WiFi */
+    /* Step 3: WiFi — web_server_init registers a ready callback,
+     * actual httpd_start is deferred until WIFI_EVENT_AP_START */
+    web_server_init();
     wifi_manager_init();
 
     /* Step 4: USB */
@@ -137,9 +139,7 @@ void app_main(void)
     anti_idle_init();
     ble_peripheral_register_conn_cb(on_pc_conn_event);
 
-    /* Step 7: Web server */
-    web_server_init();
-
+    /* Step 7: Done — web server starts via WIFI_EVENT_AP_START callback */
     ESP_LOGI(TAG, "BLE-KVM initialized, usb_mode: %d",
              cfg->usb_mode);
 }
