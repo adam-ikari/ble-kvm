@@ -3,7 +3,7 @@ if(NOT BOARD)
 endif()
 
 set(COMPONENT_SRCS
-    "main.c" "config_manager.c" "ble_peripheral.c"
+    "main.c" "config_manager.c" "event_bus.c" "ble_peripheral.c"
     "switch_manager.c" "hid_router.c" "ble_central.c"
     "wifi_manager.c" "web_server.c" "web_log.c"
     "indicator.c" "anti_idle.c"
