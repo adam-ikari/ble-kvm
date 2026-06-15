@@ -74,11 +74,20 @@ typedef struct {
     uint16_t conn_handle;
 } app_evt_device_connected_t;
 
-/* HID data events — pointer to original buffer, no copy */
+/* HID data events — data inlined for async event loop safety */
+#define HID_DATA_MAX_LEN 16
 typedef struct {
-    const uint8_t *data;
+    uint8_t data[HID_DATA_MAX_LEN];
     uint8_t len;
 } app_evt_hid_data_t;
+
+/* HID forward events — router posts, ble_peripheral subscribes */
+typedef struct {
+    uint16_t conn_handle;
+    uint8_t report_type;   /* 1=keyboard, 2=mouse */
+    uint8_t data[HID_DATA_MAX_LEN];
+    uint8_t len;
+} app_evt_hid_forward_t;
 
 typedef struct {
     uint8_t pc_id;

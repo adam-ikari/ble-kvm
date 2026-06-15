@@ -1,6 +1,5 @@
 #include "hid_router.h"
 #include "switch_manager.h"
-#include "ble_peripheral.h"
 #include "config_manager.h"
 #include "event_bus.h"
 #include "host/ble_hs.h"
@@ -48,10 +47,13 @@ void hid_router_forward_keyboard(const uint8_t *report, uint8_t len)
         if (conn_handle == BLE_HS_CONN_HANDLE_NONE) {
             return;
         }
-        int rc = ble_peripheral_send_hid_report(conn_handle, 1, report, len);
-        if (rc != 0) {
-            ESP_LOGW(TAG, "BLE keyboard forward failed: rc=%d", rc);
-        }
+        app_evt_hid_forward_t fwd = {
+            .conn_handle = conn_handle,
+            .report_type = 1,
+        };
+        fwd.len = (len > HID_DATA_MAX_LEN) ? HID_DATA_MAX_LEN : len;
+        memcpy(fwd.data, report, fwd.len);
+        APP_EVENT_POST(APP_EVENT_HID_FORWARD_KEYBOARD, &fwd, sizeof(fwd));
     }
 
     APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
@@ -73,10 +75,13 @@ void hid_router_forward_mouse(const uint8_t *report, uint8_t len)
         if (conn_handle == BLE_HS_CONN_HANDLE_NONE) {
             return;
         }
-        int rc = ble_peripheral_send_hid_report(conn_handle, 2, report, len);
-        if (rc != 0) {
-            ESP_LOGW(TAG, "BLE mouse forward failed: rc=%d", rc);
-        }
+        app_evt_hid_forward_t fwd = {
+            .conn_handle = conn_handle,
+            .report_type = 2,
+        };
+        fwd.len = (len > HID_DATA_MAX_LEN) ? HID_DATA_MAX_LEN : len;
+        memcpy(fwd.data, report, fwd.len);
+        APP_EVENT_POST(APP_EVENT_HID_FORWARD_MOUSE, &fwd, sizeof(fwd));
     }
 
     APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);

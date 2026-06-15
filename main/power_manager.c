@@ -97,8 +97,7 @@ bool power_manager_is_usb_powered(void)
 #include "esp_wifi.h"
 #if HAS_TFT_DISPLAY
 #include "esp_lcd_panel_ops.h"
-extern esp_lcd_panel_handle_t tft_display_get_panel(void);
-extern void tft_display_freeze(bool freeze);
+#include "tft_display.h"
 #endif
 
 static const char *TAG_SLEEP = "pm_sleep";

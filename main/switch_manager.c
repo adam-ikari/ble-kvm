@@ -101,19 +101,17 @@ static void on_pc_disconnected(void *arg, esp_event_base_t base,
     ESP_LOGI(TAG, "PC%d disconnected", evt->pc_id);
 
     /* Auto-switch active PC if the disconnected PC was active */
-    kvm_config_t *cfg = config_get_mutable();
+    const kvm_config_t *cfg = config_get();
     if (cfg->active_pc == evt->pc_id) {
         for (uint8_t candidate = 1; candidate <= 3; candidate++) {
             if (candidate == evt->pc_id) continue;
             if (candidate == 3) {
                 if (is_pc3_connected()) {
-                    cfg->active_pc = candidate;
                     config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
                     break;
                 }
             } else {
                 if (ble_peripheral_is_pc_connected(candidate - 1)) {
-                    cfg->active_pc = candidate;
                     config_update_u8(CONFIG_FIELD_ACTIVE_PC, candidate);
                     break;
                 }
@@ -145,7 +143,7 @@ static void switch_task_func(void *arg)
                 if (input_mode_get() != INPUT_MODE_KVM) {
                     input_mode_on_primary_button();
                 } else {
-                    kvm_config_t *cfg = config_get_mutable();
+                    const kvm_config_t *cfg = config_get();
                     uint8_t old_pc = cfg->active_pc;
                     uint8_t new_pc = old_pc;
 
@@ -168,7 +166,6 @@ static void switch_task_func(void *arg)
                     indicator_set_state(IND_PAIRING);
                     vTaskDelay(pdMS_TO_TICKS(100));
 
-                    cfg->active_pc = new_pc;
                     config_update_u8(CONFIG_FIELD_ACTIVE_PC, new_pc);
 
                     ESP_LOGI(TAG, "Switched from PC%d to PC%d", old_pc, new_pc);

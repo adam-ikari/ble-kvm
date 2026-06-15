@@ -719,11 +719,11 @@ static esp_err_t wifi_patch_handler(httpd_req_t *req)
     cJSON *ssid_item = cJSON_GetObjectItem(body, "ssid");
     cJSON *pass_item = cJSON_GetObjectItem(body, "password");
     if (cJSON_IsString(ssid_item)) {
-        kvm_config_t *cfg = config_get_mutable();
         config_update_str(CONFIG_FIELD_WIFI_SSID, ssid_item->valuestring);
         if (cJSON_IsString(pass_item)) {
             config_update_str(CONFIG_FIELD_WIFI_PASSWORD, pass_item->valuestring);
         }
+        const kvm_config_t *cfg = config_get();
         wifi_manager_start_sta(cfg->wifi_ssid, cfg->wifi_password);
     }
 
@@ -837,11 +837,9 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
 
     cJSON *dev_name = cJSON_GetObjectItem(body, "device_name");
     if (cJSON_IsString(dev_name)) {
-        strncpy(cfg->device_name, dev_name->valuestring, DEVICE_NAME_MAX - 1);
-        cfg->device_name[DEVICE_NAME_MAX - 1] = '\0';
-        config_update_str(CONFIG_FIELD_DEVICE_NAME, cfg->device_name);
+        config_update_str(CONFIG_FIELD_DEVICE_NAME, dev_name->valuestring);
         /* Update BLE advertising name */
-        ble_svc_gap_device_name_set(cfg->device_name);
+        ble_svc_gap_device_name_set(dev_name->valuestring);
     }
 
     cJSON *regen = cJSON_GetObjectItem(body, "regenerate_token");

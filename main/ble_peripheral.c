@@ -594,19 +594,15 @@ int ble_peripheral_send_consumer_key(uint16_t conn_handle, uint16_t usage_code)
 static void on_hid_forward_keyboard(void *arg, esp_event_base_t base,
                                      int32_t event_id, void *event_data)
 {
-    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
-    uint16_t conn_handle = switch_manager_get_active_conn_handle();
-    if (conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
-    ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_KEYBOARD, evt->data, evt->len);
+    app_evt_hid_forward_t *evt = (app_evt_hid_forward_t *)event_data;
+    ble_peripheral_send_hid_report(evt->conn_handle, HID_REPORT_ID_KEYBOARD, evt->data, evt->len);
 }
 
 static void on_hid_forward_mouse(void *arg, esp_event_base_t base,
                                   int32_t event_id, void *event_data)
 {
-    app_evt_hid_data_t *evt = (app_evt_hid_data_t *)event_data;
-    uint16_t conn_handle = switch_manager_get_active_conn_handle();
-    if (conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
-    ble_peripheral_send_hid_report(conn_handle, HID_REPORT_ID_MOUSE, evt->data, evt->len);
+    app_evt_hid_forward_t *evt = (app_evt_hid_forward_t *)event_data;
+    ble_peripheral_send_hid_report(evt->conn_handle, HID_REPORT_ID_MOUSE, evt->data, evt->len);
 }
 
 static void on_hid_consumer_key(void *arg, esp_event_base_t base,

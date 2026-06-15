@@ -373,10 +373,9 @@ static int ble_central_gap_event(struct ble_gap_event *event, void *arg)
             data = event->notify_rx.om->om_data;
             data_len = OS_MBUF_PKTLEN(event->notify_rx.om);
 
-            app_evt_hid_data_t hid_evt = {
-                .data = data,
-                .len = (uint8_t)data_len,
-            };
+            app_evt_hid_data_t hid_evt;
+            hid_evt.len = (data_len > HID_DATA_MAX_LEN) ? HID_DATA_MAX_LEN : (uint8_t)data_len;
+            memcpy(hid_evt.data, data, hid_evt.len);
             if (ch == keyboard_conn_handle) {
                 APP_EVENT_POST(APP_EVENT_HID_KEYBOARD_DATA, &hid_evt, sizeof(hid_evt));
             } else if (ch == mouse_conn_handle) {

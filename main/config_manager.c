@@ -53,15 +53,12 @@ static void load_active_pc(void)
     }
 }
 
-static void config_save_auth_token(void);
-
 static void load_auth_token(void)
 {
     size_t required_size = sizeof(config.auth_token);
     esp_err_t err = nvs_get_str(nvs_config, "auth_token", config.auth_token, &required_size);
     if (err != ESP_OK) {
         config_generate_auth_token();
-        config_save_auth_token();
     }
 }
 
@@ -130,12 +127,6 @@ kvm_config_t *config_get_mutable(void)
     return &config;
 }
 
-static void config_save_auth_token(void)
-{
-    ESP_ERROR_CHECK(nvs_set_str(nvs_config, "auth_token", config.auth_token));
-    ESP_ERROR_CHECK(nvs_commit(nvs_config));
-}
-
 void config_generate_auth_token(void)
 {
     const char charset[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -143,6 +134,10 @@ void config_generate_auth_token(void)
         config.auth_token[i] = charset[esp_random() % (sizeof(charset) - 1)];
     }
     config.auth_token[AUTH_TOKEN_LEN - 1] = '\0';
+
+    /* Save to NVS first, then notify subscribers */
+    nvs_set_str(nvs_config, "auth_token", config.auth_token);
+    nvs_commit(nvs_config);
     ESP_LOGI(TAG, "Generated auth token: %s", config.auth_token);
 
     app_evt_config_changed_t evt = { .field = CONFIG_FIELD_AUTH_TOKEN };

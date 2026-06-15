@@ -15,6 +15,7 @@
 #include "board.h"
 #if HAS_BATTERY || HAS_INPUT_MODES || HAS_VOICE_INPUT
 #include "driver/i2c_master.h"
+#include "tft_display.h"
 #endif
 #if HAS_INPUT_MODES
 #include "input_mode.h"
@@ -79,7 +80,7 @@ void app_main(void)
 
     /* Step 2: Init I2C peripherals using the shared bus */
 #if HAS_BATTERY || HAS_INPUT_MODES || HAS_VOICE_INPUT
-    extern i2c_master_bus_handle_t tft_display_get_i2c_bus(void);
+#include "tft_display.h"
     i2c_master_bus_handle_t i2c_bus = tft_display_get_i2c_bus();
 #endif
 

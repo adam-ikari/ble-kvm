@@ -38,10 +38,14 @@ static void hid_interface_cb(hid_host_device_handle_t dev,
         hid_host_device_get_params(dev, &params);
 
         if (params.proto == HID_PROTOCOL_KEYBOARD) {
-            app_evt_hid_data_t hid_evt = { .data = data, .len = (uint8_t)data_len };
+            app_evt_hid_data_t hid_evt;
+            hid_evt.len = (data_len > HID_DATA_MAX_LEN) ? HID_DATA_MAX_LEN : (uint8_t)data_len;
+            memcpy(hid_evt.data, data, hid_evt.len);
             APP_EVENT_POST(APP_EVENT_HID_KEYBOARD_DATA, &hid_evt, sizeof(hid_evt));
         } else if (params.proto == HID_PROTOCOL_MOUSE) {
-            app_evt_hid_data_t hid_evt = { .data = data, .len = (uint8_t)data_len };
+            app_evt_hid_data_t hid_evt;
+            hid_evt.len = (data_len > HID_DATA_MAX_LEN) ? HID_DATA_MAX_LEN : (uint8_t)data_len;
+            memcpy(hid_evt.data, data, hid_evt.len);
             APP_EVENT_POST(APP_EVENT_HID_MOUSE_DATA, &hid_evt, sizeof(hid_evt));
         }
     } else if (event == HID_HOST_INTERFACE_EVENT_DISCONNECTED) {
