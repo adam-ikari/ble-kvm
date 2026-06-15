@@ -1,6 +1,6 @@
 #include "anti_idle.h"
 #include "config_manager.h"
-#include "switch_manager.h"
+#include "event_bus.h"
 #include "ble_peripheral.h"
 #include "ble_central.h"
 #if HAS_USB
@@ -96,6 +96,10 @@ void anti_idle_init(void)
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &idle_timer));
 
+    APP_EVENT_SUBSCRIBE(APP_EVENT_HID_ACTIVITY, on_hid_activity, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_PC_CONNECTED, on_pc_connected, NULL);
+    APP_EVENT_SUBSCRIBE(APP_EVENT_CONFIG_CHANGED, on_config_changed, NULL);
+
     if (config_get()->anti_idle_enabled) {
         restart_timer();
     }
@@ -103,13 +107,13 @@ void anti_idle_init(void)
              config_get()->anti_idle_enabled, config_get()->anti_idle_interval_sec);
 }
 
-void anti_idle_on_activity(void)
+static void on_hid_activity(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
 {
     int64_t now = esp_timer_get_time();
     bool is_active;
     portENTER_CRITICAL(&anti_idle_spinlock);
     is_active = active;
-    /* Mark all connected PCs as active */
     for (int i = 0; i < 3; i++) {
         pc_last_activity[i] = now;
     }
@@ -119,24 +123,22 @@ void anti_idle_on_activity(void)
     }
 }
 
-void anti_idle_on_pc_connected(uint8_t pc_id)
+static void on_pc_connected(void *arg, esp_event_base_t base,
+                            int32_t event_id, void *event_data)
 {
-    if (pc_id < 1 || pc_id > 3) return;
+    app_evt_pc_connected_t *evt = (app_evt_pc_connected_t *)event_data;
+    if (evt->pc_id < 1 || evt->pc_id > 3) return;
     portENTER_CRITICAL(&anti_idle_spinlock);
-    pc_last_activity[pc_id - 1] = esp_timer_get_time();
+    pc_last_activity[evt->pc_id - 1] = esp_timer_get_time();
     portEXIT_CRITICAL(&anti_idle_spinlock);
 }
 
-void anti_idle_set_enabled(bool enabled)
+static void on_config_changed(void *arg, esp_event_base_t base,
+                              int32_t event_id, void *event_data)
 {
-    config_update_bool(CONFIG_FIELD_ANTI_IDLE_ENABLED, enabled);
-    restart_timer();
-}
-
-void anti_idle_set_interval(uint16_t interval_sec)
-{
-    if (interval_sec < 10) interval_sec = 10;
-    if (interval_sec > 3600) interval_sec = 3600;
-    config_update_u16(CONFIG_FIELD_ANTI_IDLE_INTERVAL, interval_sec);
-    restart_timer();
+    app_evt_config_changed_t *evt = (app_evt_config_changed_t *)event_data;
+    if (evt->field == CONFIG_FIELD_ANTI_IDLE_ENABLED ||
+        evt->field == CONFIG_FIELD_ANTI_IDLE_INTERVAL) {
+        restart_timer();
+    }
 }
