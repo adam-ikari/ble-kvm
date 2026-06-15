@@ -2,6 +2,7 @@
 #if HAS_INPUT_MODES
 
 #include "config_manager.h"
+#include "event_bus.h"
 #include "ble_peripheral.h"
 #include "switch_manager.h"
 #include "imu_driver.h"
@@ -50,6 +51,8 @@ static void air_mouse_task_func(void *arg)
                                  0x00};
             uint16_t conn = switch_manager_get_active_conn_handle();
             if (conn) ble_peripheral_send_hid_report(conn, 2, report, 4);
+            /* Notify power manager of IMU activity */
+            APP_EVENT_POST(APP_EVENT_INPUT_IMU_MOTION, NULL, 0);
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -98,10 +101,13 @@ input_mode_t input_mode_get(void)
 void input_mode_set(input_mode_t mode)
 {
     if (mode == current_mode) return;
+    input_mode_t old = current_mode;
     if (current_mode == INPUT_MODE_PPT_AIR) stop_air_mouse();
     current_mode = mode;
     config_update_u8(CONFIG_FIELD_INPUT_MODE, (uint8_t)mode);
     if (mode == INPUT_MODE_PPT_AIR) start_air_mouse();
+    app_evt_input_mode_changed_t evt = { .old_mode = (uint8_t)old, .new_mode = (uint8_t)mode };
+    APP_EVENT_POST(APP_EVENT_INPUT_MODE_CHANGED, &evt, sizeof(evt));
     ESP_LOGI(TAG, "Mode set to %d", mode);
 }
 
