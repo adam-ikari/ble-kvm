@@ -405,7 +405,10 @@ void switch_manager_init(void)
     switch_queue = xQueueCreate(4, sizeof(uint8_t));
     xTaskCreate(switch_task_func, "switch_mgr", 4096, NULL, 3, &switch_task_handle);
 
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    /* GPIO ISR setup is independent of BLE — no delay needed.
+     * Button presses are queued and processed by switch_task_func
+     * which handles mode-dependent dispatch correctly regardless
+     * of BLE state (e.g. input_mode checks happen at dispatch time). */
 
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << BUTTON_SWITCH_GPIO),

@@ -15,9 +15,6 @@ static i2c_master_dev_handle_t pmic_dev;
 static SemaphoreHandle_t pmic_mutex = NULL;
 static int64_t last_activity_time = 0;
 
-#define SLEEP_IDLE_MS      (5 * 60 * 1000)
-#define SLEEP_DEEP_MS      (15 * 60 * 1000)
-
 static esp_err_t pmic_read(uint8_t reg, uint8_t *val)
 {
     if (!pmic_mutex) return ESP_FAIL;

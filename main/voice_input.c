@@ -160,17 +160,22 @@ static int ascii_to_hid(char ch, uint8_t *mod, uint8_t *key)
 }
 
 /* Type a UTF-8 string as HID keyboard input.
- * For voice_input_mode == 2 (ascii), non-ASCII bytes are skipped.
- * For voice_input_mode == 0 (auto) or 1 (pinyin), non-ASCII characters
- * are skipped since we cannot type CJK via a standard HID keyboard. */
+ *
+ * Mode 0 (auto) / Mode 1 (pinyin): Best-effort — type ASCII characters directly;
+ *   skip CJK/non-ASCII bytes. CJK output requires an active Chinese IME on the
+ *   target PC to convert the typed pinyin romanization.
+ * Mode 2 (ascii): Strict ASCII-only — skip all non-ASCII bytes. */
 static void type_text(const char *text, uint8_t voice_input_mode)
 {
-    (void)voice_input_mode; /* CJK typing not supported over basic HID */
+    bool ascii_only = (voice_input_mode == 2);
 
     for (; *text; text++) {
         /* Skip UTF-8 continuation bytes and any non-ASCII character */
         uint8_t ch = (uint8_t)*text;
         if (ch > 0x7F) {
+            if (ascii_only) {
+                ESP_LOGD(TAG, "ASCII-only mode: skipping non-ASCII byte 0x%02X", ch);
+            }
             /* Skip the entire multi-byte UTF-8 sequence */
             while ((*text & 0xC0) == 0x80) text++;
             /* After the loop, text points at the last continuation byte.
@@ -181,6 +186,8 @@ static void type_text(const char *text, uint8_t voice_input_mode)
         uint8_t mod, key;
         if (ascii_to_hid(ch, &mod, &key) == 0) {
             type_key(mod, key);
+        } else if (ascii_only) {
+            ESP_LOGD(TAG, "ASCII-only mode: untypeable char 0x%02X", ch);
         }
     }
 }
