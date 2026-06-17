@@ -3,6 +3,7 @@
 #if HAS_INPUT_MODES
 
 #include "esp_log.h"
+#include "event_bus.h"
 #include <math.h>
 
 static const char *TAG = "imu";
@@ -44,8 +45,7 @@ void imu_driver_read_cursor(uint8_t sensitivity, imu_cursor_t *out)
     out->x = 0;
     out->y = 0;
 #if HAS_BATTERY
-    extern void pm_sleep_on_imu_motion(void);
-    pm_sleep_on_imu_motion();
+    APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
 #endif
     if (!imu_dev) return;
 

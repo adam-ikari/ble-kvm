@@ -26,6 +26,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         switch (event_id) {
         case WIFI_EVENT_AP_START:
             ESP_LOGI(TAG, "AP started, netif ready");
+            if (ap_netif) {
+                ESP_LOGI(TAG, "AP netif is_up=%d", esp_netif_is_netif_up(ap_netif));
+                /* Print netif IP config for diagnostic */
+                esp_netif_ip_info_t ip_info;
+                if (esp_netif_get_ip_info(ap_netif, &ip_info) == ESP_OK) {
+                    ESP_LOGI(TAG, "AP IP: " IPSTR ", mask: " IPSTR ", gw: " IPSTR,
+                             IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&ip_info.gw));
+                }
+                esp_err_t dhcps_err = esp_netif_dhcps_start(ap_netif);
+                ESP_LOGI(TAG, "DHCP server explicit start: %s",
+                         dhcps_err == ESP_OK ? "OK" :
+                         dhcps_err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED ? "already started" :
+                         esp_err_to_name(dhcps_err));
+            }
             APP_EVENT_POST(APP_EVENT_WIFI_AP_READY, NULL, 0);
             break;
         case WIFI_EVENT_AP_STACONNECTED:

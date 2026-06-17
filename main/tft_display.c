@@ -549,7 +549,12 @@ static void draw_pairing_page(void)
  * ═══════════════════════════════════════════════════════════════════════ */
 static void tft_task(void *arg)
 {
+    int loop_count = 0;
     while (1) {
+        if (loop_count == 0) {
+            ESP_LOGI(TAG, "TFT task running, state=%d page=%d", current_state, current_page);
+        }
+        loop_count++;
         indicator_state_t local_state;
         int local_page;
         portENTER_CRITICAL(&tft_spinlock);
@@ -706,8 +711,8 @@ void tft_display_init(void)
     memset(fb, 0, sizeof(fb));
     flush_fb();
 
-    xTaskCreate(tft_task, "tft_disp", 4096, NULL, 1, NULL);
-    ESP_LOGI(TAG, "TFT display initialized");
+    xTaskCreatePinnedToCore(tft_task, "tft_disp", 8192, NULL, 2, NULL, 1);
+    ESP_LOGI(TAG, "TFT display initialized (core 1, stack 8KB)");
 }
 
 void tft_display_set_state(indicator_state_t state)

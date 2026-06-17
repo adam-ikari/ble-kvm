@@ -305,7 +305,7 @@ static esp_err_t switch_handler(httpd_req_t *req)
     if (!check_auth(req)) return ESP_OK;
 
 #if HAS_BATTERY
-    pm_sleep_on_activity();
+    APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
 #endif
 
     switch_manager_request_switch();
@@ -803,7 +803,7 @@ static esp_err_t settings_patch_handler(httpd_req_t *req)
     if (!check_auth(req)) return ESP_OK;
 
 #if HAS_BATTERY
-    pm_sleep_on_activity();
+    APP_EVENT_POST(APP_EVENT_HID_ACTIVITY, NULL, 0);
 #endif
 
     char buf[256] = {0};
