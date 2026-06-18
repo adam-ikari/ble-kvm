@@ -40,6 +40,7 @@ static void web_server_start(void);
 typedef struct {
     httpd_handle_t hd;
     int fd;
+    httpd_req_t *req;  /* stored for httpd_resp_send_chunk after initial response */
     bool active;
 } sse_client_t;
 
@@ -78,7 +79,9 @@ static void sse_send_to_client(sse_client_t *client, const char *event, const ch
         len = (int)sizeof(pkt) - 1;
         pkt[len] = '\0';
     }
-    httpd_socket_send(client->hd, client->fd, pkt, len, 0);
+    /* Use httpd_resp_send_chunk so data is properly framed for the
+     * chunked transfer encoding established by events_handler. */
+    httpd_resp_send_chunk(client->req, pkt, len);
 }
 
 static void sse_broadcast(const char *event, const char *data)
@@ -111,6 +114,7 @@ static esp_err_t sse_add_client(httpd_req_t *req)
         if (!sse_clients[i].active) {
             sse_clients[i].hd = req->handle;
             sse_clients[i].fd = httpd_req_to_sockfd(req);
+            sse_clients[i].req = req;
             sse_clients[i].active = true;
             xSemaphoreGive(sse_mutex);
             return ESP_OK;
@@ -141,30 +145,15 @@ static esp_err_t root_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 
-    /* Send in 4 KB chunks to avoid overflowing the TCP send buffer (16 KB).
-     * httpd_resp_send() pushes everything at once and blocks when the buffer
-     * is full, causing the client to time out and disconnect (ECONNRESET). */
-    esp_err_t err;
-    const char *data = (const char *)web_dist_index_html_gz;
-    size_t remaining = web_dist_index_html_gz_len;
-    size_t offset = 0;
-
-    while (remaining > 0) {
-        size_t chunk = (remaining > 4096) ? 4096 : remaining;
-        err = httpd_resp_send_chunk(req, data + offset, chunk);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to send HTML chunk at offset %u: %s",
-                     (unsigned)offset, esp_err_to_name(err));
-            return err;
-        }
-        offset += chunk;
-        remaining -= chunk;
-    }
-
-    /* Signal end of chunked response */
-    err = httpd_resp_send_chunk(req, NULL, 0);
+    /* Use httpd_resp_send() — simpler than chunked, includes Content-Length.
+     * WiFi/LWIP can now use PSRAM (SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y) so the
+     * 63KB send has enough buffer space. */
+    esp_err_t err = httpd_resp_send(req, (const char *)web_dist_index_html_gz,
+                                    web_dist_index_html_gz_len);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send HTML terminator: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to send HTML: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "HTML sent successfully, %u bytes", web_dist_index_html_gz_len);
     }
     return err;
 }
@@ -330,6 +319,7 @@ static esp_err_t switch_handler(httpd_req_t *req)
 typedef struct {
     httpd_handle_t hd;
     int fd;
+    httpd_req_t *req;  /* stored for httpd_resp_send_chunk after initial response */
     bool active;
 } log_client_t;
 
@@ -369,8 +359,10 @@ static void log_sse_broadcast(const char *event, const char *data)
         if (pos >= 0 && pos < (int)sizeof(pkt)) {
             snprintf(pkt + pos, sizeof(pkt) - pos, "\n");
         }
-        int sent = httpd_socket_send(log_clients[i].hd, log_clients[i].fd, pkt, pos, 0);
-        if (sent < 0) {
+        /* Use httpd_resp_send_chunk so data is properly framed for the
+         * chunked transfer encoding established by logs_handler. */
+        int sent = httpd_resp_send_chunk(log_clients[i].req, pkt, pos);
+        if (sent != ESP_OK) {
             log_clients[i].active = false;
         }
     }
@@ -397,13 +389,16 @@ static esp_err_t logs_handler(httpd_req_t *req)
     }
     log_clients[slot].hd = req->handle;
     log_clients[slot].fd = httpd_req_to_sockfd(req);
+    log_clients[slot].req = req;
     log_clients[slot].active = true;
     xSemaphoreGive(log_mutex);
 
     httpd_resp_set_type(req, "text/event-stream");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "Connection", "keep-alive");
-    httpd_resp_sendstr(req, "event: connected\ndata: {}\n\n");
+    /* Use chunked encoding (no Content-Length) so the browser keeps the
+     * connection open for SSE events. */
+    httpd_resp_send_chunk(req, "event: connected\ndata: {}\n\n", HTTPD_RESP_USE_STRLEN);
 
     /* Block until client disconnects.
      * recv(MSG_PEEK|MSG_DONTWAIT) returns:
@@ -439,7 +434,10 @@ static esp_err_t events_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/event-stream");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "Connection", "keep-alive");
-    httpd_resp_sendstr(req, "event: connected\ndata: {}\n\n");
+    /* Use chunked encoding (no Content-Length) so the browser keeps the
+     * connection open for SSE events. httpd_resp_sendstr would set
+     * Content-Length, causing the browser to close after reading. */
+    httpd_resp_send_chunk(req, "event: connected\ndata: {}\n\n", HTTPD_RESP_USE_STRLEN);
 
     /* Block this task to keep the SSE connection alive.
      * recv(MSG_PEEK|MSG_DONTWAIT) returns:
