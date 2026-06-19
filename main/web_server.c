@@ -152,31 +152,13 @@ static esp_err_t root_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 
-    /* Send in 4 KB chunks to avoid overflowing the TCP send buffer.
-     * httpd_resp_send() pushes everything at once and blocks when the buffer
-     * is full (default 32KB), causing the client to disconnect (ECONNRESET)
-     * with a ~63KB gzip HTML. */
-    esp_err_t err;
-    const char *data = (const char *)web_dist_index_html_gz;
-    size_t remaining = web_dist_index_html_gz_len;
-    size_t offset = 0;
-
-    while (remaining > 0) {
-        size_t chunk = (remaining > 4096) ? 4096 : remaining;
-        err = httpd_resp_send_chunk(req, data + offset, chunk);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to send HTML chunk at offset %u: %s",
-                     (unsigned)offset, esp_err_to_name(err));
-            return err;
-        }
-        offset += chunk;
-        remaining -= chunk;
-    }
-
-    /* Signal end of chunked response */
-    err = httpd_resp_send_chunk(req, NULL, 0);
+    /* httpd_resp_send() sets Content-Length and sends the full response.
+     * TCP send buffer is 64KB (CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65536),
+     * enough for the ~64KB gzip HTML. */
+    esp_err_t err = httpd_resp_send(req, (const char *)web_dist_index_html_gz,
+                                    web_dist_index_html_gz_len);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send HTML terminator: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to send HTML: %s", esp_err_to_name(err));
     } else {
         ESP_LOGI(TAG, "HTML sent successfully, %u bytes", web_dist_index_html_gz_len);
     }

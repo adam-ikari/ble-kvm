@@ -33,7 +33,6 @@ export type { Status };
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
-  const [checking, setChecking] = useState(true);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -63,35 +62,25 @@ export default function App() {
     },
   });
 
-  /* Check for existing token on mount */
+  /* On mount: check if we already have a valid token */
   useEffect(() => {
     const existingToken = localStorage.getItem('kvm_auth_token');
     if (existingToken) {
-      /* Try an authenticated request to verify the token is still valid */
-      api.status().then(() => {
+      api.status().then((s) => {
+        setStatus(s);
         setAuthed(true);
-        setChecking(false);
       }).catch(() => {
-        /* Token invalid, remove it */
         localStorage.removeItem('kvm_auth_token');
-        setChecking(false);
       });
-    } else {
-      setChecking(false);
     }
   }, []);
 
-  useEffect(() => { if (authed) refresh(); }, [authed, refresh]);
+  /* When authed becomes true, fetch full status */
+  useEffect(() => {
+    if (authed && !status) refresh();
+  }, [authed, status, refresh]);
 
-  if (checking) {
-    return (
-      <div className={styles.container}>
-        <h1>BLE-KVM</h1>
-        <p>Checking authentication...</p>
-      </div>
-    );
-  }
-
+  /* Unauthed — show prompt */
   if (!authed) {
     return (
       <div className={styles.container}>
@@ -105,6 +94,7 @@ export default function App() {
   return (
     <div className={styles.container}>
       <h1>BLE-KVM</h1>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       {status && <StatusCard status={status} onSwitch={() => api.switchPc().then(refresh)} />}
       {status && <DeviceList devices={status.devices} />}
       <PairPanel />
