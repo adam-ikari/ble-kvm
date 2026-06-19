@@ -65,6 +65,7 @@ static bool check_auth(httpd_req_t *req)
         }
     }
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "401 Unauthorized");
     httpd_resp_sendstr(req, "{\"status\":\"waiting\",\"message\":\"Double-click the device button to authorize\"}");
     return false;
 }
@@ -88,12 +89,15 @@ static void sse_broadcast(const char *event, const char *data)
 {
     if (!sse_mutex) return;
     xSemaphoreTake(sse_mutex, portMAX_DELAY);
+    int count = 0;
     for (int i = 0; i < MAX_SSE_CLIENTS; i++) {
         if (sse_clients[i].active) {
             sse_send_to_client(&sse_clients[i], event, data);
+            count++;
         }
     }
     xSemaphoreGive(sse_mutex);
+    ESP_LOGI(TAG, "SSE broadcast '%s' to %d clients: %s", event, count, data);
 }
 
 static void sse_keepalive_cb(void *arg)
