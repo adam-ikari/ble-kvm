@@ -63,6 +63,9 @@ static bool check_auth(httpd_req_t *req)
                 return true;
             }
         }
+        ESP_LOGW(TAG, "Auth failed: got '%s', expected 'Bearer %s'", auth_header, cfg->auth_token);
+    } else {
+        ESP_LOGW(TAG, "Auth failed: no Authorization header");
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, "401 Unauthorized");
@@ -208,6 +211,7 @@ static esp_err_t auth_check_handler(httpd_req_t *req)
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "GET /api/status");
     if (!check_auth(req)) return ESP_OK;
 
     const kvm_config_t *cfg = config_get();
