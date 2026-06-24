@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from './api';
 import { useSse } from './hooks/useSse';
 import { StatusCard } from './components/StatusCard';
@@ -33,6 +33,7 @@ export type { Status };
 
 export default function App() {
   const [authed, setAuthed] = useState(false);
+  const authedRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -54,10 +55,11 @@ export default function App() {
 
   useSse({
     onSwitch: (activePc) => setStatus((s) => s ? { ...s, active_pc: activePc } : s),
-    onConnection: () => refresh(),
+    onConnection: () => { if (authedRef.current) refresh(); },
     onDevice: () => refresh(),
     onAuth: (token: string) => {
       localStorage.setItem('kvm_auth_token', token);
+      authedRef.current = true;
       setAuthed(true);
     },
   });
@@ -68,6 +70,7 @@ export default function App() {
     if (existingToken) {
       api.status().then((s) => {
         setStatus(s);
+        authedRef.current = true;
         setAuthed(true);
       }).catch(() => {
         localStorage.removeItem('kvm_auth_token');

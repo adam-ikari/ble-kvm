@@ -9,6 +9,8 @@
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -82,7 +84,9 @@ static const uint8_t font5x7[][5] = {
 #define C_RED_BG    RGB565(100, 0, 0)
 #define C_DIM_WHITE RGB565(160, 160, 170)
 
-static uint16_t fb[TFT_WIDTH * TFT_HEIGHT];
+/* Framebuffer in PSRAM (64,800 bytes). SPI-DMA cannot read PSRAM directly,
+ * so flush_fb() copies line-by-line through a small internal DMA buffer. */
+static EXT_RAM_BSS_ATTR uint16_t fb[TFT_WIDTH * TFT_HEIGHT];
 
 /* ── Drawing primitives ────────────────────────────────────────────── */
 static void fill_rect(int x, int y, int w, int h, uint16_t color)
@@ -175,9 +179,25 @@ static void draw_card(int x, int y, int w, int h)
 }
 
 /* ── Flush framebuffer ─────────────────────────────────────────────── */
+/* PSRAM framebuffer is not directly DMA-capable for SPI. Copy each line
+ * through a small (480-byte) internal DMA buffer, then send via
+ * esp_lcd_panel_draw_bitmap. This avoids the 64KB internal DMA allocation
+ * that would exhaust precious internal DRAM. */
 static void flush_fb(void)
 {
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, TFT_WIDTH, TFT_HEIGHT, fb);
+    /* One line = 240 pixels × 2 bytes = 480 bytes. Small enough to fit
+     * comfortably in internal DMA memory. */
+    uint16_t *line_buf = heap_caps_malloc(TFT_WIDTH * 2,
+                                          MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!line_buf) {
+        ESP_LOGE(TAG, "flush_fb: failed to alloc line buffer");
+        return;
+    }
+    for (int y = 0; y < TFT_HEIGHT; y++) {
+        memcpy(line_buf, &fb[y * TFT_WIDTH], TFT_WIDTH * 2);
+        esp_lcd_panel_draw_bitmap(panel, 0, y, TFT_WIDTH, y + 1, line_buf);
+    }
+    free(line_buf);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

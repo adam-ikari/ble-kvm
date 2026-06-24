@@ -152,14 +152,25 @@ static esp_err_t root_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 
-    /* httpd_resp_send() sets Content-Length and sends the full response.
-     * TCP send buffer is 64KB (CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65536),
-     * enough for the ~64KB gzip HTML. */
-    esp_err_t err = httpd_resp_send(req, (const char *)web_dist_index_html_gz,
-                                    web_dist_index_html_gz_len);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to send HTML: %s", esp_err_to_name(err));
-    } else {
+    /* Chunked send: the gzip HTML (~65KB) exceeds the 32KB TCP send buffer
+     * (CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768). httpd_resp_send() would set
+     * Content-Length and overflow the buffer, causing ECONNRESET. Using 4KB
+     * chunks with Transfer-Encoding: chunked avoids this. */
+    const char *data = (const char *)web_dist_index_html_gz;
+    size_t remaining = web_dist_index_html_gz_len;
+    while (remaining > 0) {
+        size_t chunk = remaining > 4096 ? 4096 : remaining;
+        esp_err_t err = httpd_resp_send_chunk(req, data, chunk);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send HTML chunk: %s", esp_err_to_name(err));
+            httpd_resp_send_chunk(req, NULL, 0); /* terminate */
+            return err;
+        }
+        data += chunk;
+        remaining -= chunk;
+    }
+    esp_err_t err = httpd_resp_send_chunk(req, NULL, 0); /* end-of-chunks */
+    if (err == ESP_OK) {
         ESP_LOGI(TAG, "HTML sent successfully, %u bytes", web_dist_index_html_gz_len);
     }
     return err;
