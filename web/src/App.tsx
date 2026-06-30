@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from './api';
 import { useSse } from './hooks/useSse';
-import { StatusCard } from './components/StatusCard';
-import { DeviceList } from './components/DeviceList';
-import { PairPanel } from './components/PairPanel';
+import { Dashboard } from './components/Dashboard';
+import { DevicesPanel } from './components/DevicesPanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { WifiPanel } from './components/WifiPanel';
+import { NetworkPanel } from './components/NetworkPanel';
 import styles from './styles/App.module.css';
 
 interface Pc { id: number; name: string; connected: boolean; type?: string }
@@ -31,10 +30,20 @@ interface Status {
 
 export type { Status };
 
+type Tab = 'dashboard' | 'devices' | 'settings' | 'network';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'devices', label: 'Devices' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'network', label: 'Network' },
+];
+
 export default function App() {
   const [authed, setAuthed] = useState(false);
   const authedRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [error, setError] = useState('');
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -98,11 +107,24 @@ export default function App() {
     <div className={styles.container}>
       <h1>BLE-KVM</h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
-      {status && <StatusCard status={status} onSwitch={() => api.switchPc().then(refresh)} />}
-      {status && <DeviceList devices={status.devices} />}
-      <PairPanel />
-      <WifiPanel wifi={status?.wifi ?? null} onRefresh={refresh} />
-      <SettingsPanel status={status} toast={toast} refresh={refresh} />
+
+      <nav className={styles.tabNav}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`${styles.tab} ${activeTab === t.key ? styles.tabActive : ''}`}
+            onClick={() => setActiveTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'dashboard' && <Dashboard status={status} toast={toast} refresh={refresh} />}
+      {activeTab === 'devices' && <DevicesPanel status={status} toast={toast} />}
+      {activeTab === 'settings' && <SettingsPanel status={status} toast={toast} refresh={refresh} />}
+      {activeTab === 'network' && <NetworkPanel status={status} toast={toast} refresh={refresh} />}
+
       {toastMsg && (
         <div className={styles.toast} data-type={toastMsg.type}>
           {toastMsg.text}

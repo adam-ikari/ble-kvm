@@ -298,3 +298,535 @@
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* ── Tab Navigation ────────────────────────────────────────────────── */
+
+.tabNav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 8px 4px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab:hover {
+  color: #1a73e8;
+}
+
+.tabActive {
+  background: #1a73e8;
+  color: white;
+}
+
+.tabActive:hover {
+  color: white;
+}
+
+/* ── Shared dots ───────────────────────────────────────────────────── */
+
+.dotGreen { background: #1a7f37; }
+.dotRed   { background: #d93025; }
+.dotDim   { background: #ccc; }
+
+/* ── Dashboard ─────────────────────────────────────────────────────── */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+}
+
+.activePcCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a73e8;
+  color: white;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.activePcInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activePcLabel {
+  font-size: 11px;
+  opacity: 0.8;
+  letter-spacing: 0.5px;
+}
+
+.activePcName {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.activePcConn {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.switchBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.switchBtn:disabled {
+  opacity: 0.5;
+}
+
+.switchIcon {
+  font-size: 16px;
+}
+
+.pcGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.pcCard {
+  position: relative;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.pcCardActive {
+  border-color: #1a73e8;
+  background: #e8f0fe;
+}
+
+.pcCardOnline {
+  border-left: 3px solid #1a7f37;
+}
+
+.pcCardOffline {
+  border-left: 3px solid #ccc;
+  opacity: 0.7;
+}
+
+.pcCardIcon {
+  font-size: 18px;
+}
+
+.pcCardName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pcCardLabel {
+  font-size: 11px;
+  color: #666;
+}
+
+.pcCardType {
+  font-size: 10px;
+  color: #999;
+}
+
+.pcCardBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #1a73e8;
+  color: white;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.statCard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.statIcon {
+  font-size: 20px;
+}
+
+.statInfo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.statValue {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: #666;
+}
+
+.statDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.infoBar {
+  display: flex;
+  justify-content: space-between;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.infoItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.infoValue {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.infoLabel {
+  font-size: 10px;
+  color: #666;
+}
+
+.voiceBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: #fce8e6;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #d93025;
+}
+
+.voiceDot {
+  width: 10px;
+  height: 10px;
+  background: #d93025;
+  border-radius: 50%;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ── Devices Panel ─────────────────────────────────────────────────── */
+
+.devicesPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.bindingList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bindingItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bindingIcon {
+  font-size: 20px;
+}
+
+.bindingInfo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.bindingName {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.bindingStatus {
+  font-size: 12px;
+  color: #666;
+}
+
+.bindingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.pairActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.btnWithIcon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.btnIcon {
+  font-size: 14px;
+}
+
+.btnSecondary {
+  background: #f5f5f5;
+  color: #1a73e8;
+  border: 1px solid #ddd;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btnSecondary:disabled {
+  opacity: 0.5;
+}
+
+.pcPairPrompt {
+  margin-top: 12px;
+  padding: 12px;
+  background: #e8f0fe;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #444;
+}
+
+.pcPairPrompt button {
+  margin-top: 8px;
+}
+
+.scanProgress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #666;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ddd;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.resultsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.resultItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.resultInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resultName {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.resultAddr {
+  font-size: 11px;
+  color: #999;
+}
+
+.resultActions {
+  display: flex;
+  gap: 6px;
+}
+
+.resultBtn {
+  background: #1a73e8;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resultBtn:disabled {
+  opacity: 0.5;
+}
+
+.resultNoHid {
+  font-size: 11px;
+  color: #999;
+}
+
+/* ── Network Panel ─────────────────────────────────────────────────── */
+
+.networkPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.networkStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.networkMain {
+  display: flex;
+  align-items: center;
+}
+
+.networkMode {
+  font-size: 15px;
+  font-weight: 600;
+  color: #666;
+}
+
+.networkActive {
+  color: #1a73e8;
+}
+
+.networkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.networkLabel {
+  font-size: 12px;
+  color: #999;
+  width: 30px;
+}
+
+.networkDetail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.networkSsid {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.networkIp {
+  font-size: 11px;
+  color: #999;
+}
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.modeBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: white;
+  border: 1px solid #ddd;
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #444;
+}
+
+.modeBtn:disabled {
+  opacity: 0.5;
+}
+
+.modeBtnActive {
+  border-color: #1a73e8;
+  background: #e8f0fe;
+  color: #1a73e8;
+}
+
+.modeBtnIcon {
+  font-size: 18px;
+}
+
+.connectForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
