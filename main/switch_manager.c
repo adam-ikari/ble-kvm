@@ -197,7 +197,7 @@ static void switch_task_func(void *arg)
             }
             else if (cmd == CMD_FACTORY_WARN) {
                 ESP_LOGW(TAG, "Factory reset warning — hold 10s to confirm");
-                indicator_set_state(IND_PAIRING);
+                indicator_set_state(IND_FACTORY_WARN);
             }
             else if (cmd == CMD_FACTORY_CANCEL) {
                 ESP_LOGI(TAG, "Factory reset cancelled");
